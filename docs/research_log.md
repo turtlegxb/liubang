@@ -813,3 +813,38 @@ top3_net_share=0.4293
 
 - 仅靠核心池冷却不能解决依赖问题。
 - 扩展股票池 + 3 天单票冷却显著改善集中度，并通过 validation。
+
+## 2026-05-21 当周 GEX 上下文
+
+新增 `src/liubang/gex.py` 和 `scripts/calc_weekly_gex.py`。
+
+行为：
+
+- 使用 Schwab option chain 中的 `gamma`、`openInterest` 和 `multiplier`
+- 默认只统计当前美东交易日至本周五到期的合约
+- 默认只保留距离现货 ±15% 的 strike
+- 计算约定：call GEX 为正，put GEX 为负
+- 单位：标的上涨 1% 时的美元 gamma exposure 代理值
+- `generate_signals.py` 默认把 `weekly_gex` 写入最终 watchlist 的 `options_context`
+- dashboard 的 “Watchlist 今日行情” 显示 GEX 状态、净 GEX、Call Wall、Put Wall
+- watchlist CSV 导出同样包含 `weekly_gex_regime`、`weekly_net_gex`、`weekly_call_wall`、`weekly_put_wall`
+
+命令：
+
+```bash
+scripts/liubang_live.sh gex AMD --refresh
+```
+
+注意：该值是基于公开链上 OI 的代理值，不代表真实 dealer 持仓；当前只作为风险/上下文，不直接改变买入分数或自动下单。
+
+## 2026-05-21 Paper 开仓槽位修正
+
+问题：观察模式下 `signals` 默认用 `data/manual_positions.json` 计算 portfolio guard；本地 paper 模式实际持仓在 `data/paper_positions.json`，导致 dashboard 显示还有槽位，且 `record_paper_triggers.py` 没有二次限制新增 paper 持仓数量。
+
+修正：
+
+- `scripts/liubang_live.sh` 的默认观察配置增加 `--positions-file data/paper_positions.json`
+- `scripts/record_paper_triggers.py` 根据最新 trigger report 的 `max_positions` 和当前 paper 开放持仓数量重新计算剩余槽位
+- paper 持仓已满时，新触发写入 `skipped_portfolio_full`，不再追加到 `data/paper_positions.json`
+
+当前状态示例：neutral regime 最大 2 个持仓，paper 已有 AAPL、ARM、CRWD 共 3 个开放持仓，因此 dashboard 显示 `仓位槽位 0 / 2`，`允许新开 no`。

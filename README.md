@@ -14,6 +14,7 @@ Liubang 是一个面向美股短线选股的本地信号系统。当前定位是
 - 本地手动持仓监控
 - 重复持仓和总敞口保护
 - 基于交易日志的风险熔断
+- 当周期权链 GEX 上下文
 - Discord 推送
 - 离线 smoke tests
 
@@ -50,6 +51,7 @@ scripts/liubang_live.sh triggers
 scripts/liubang_live.sh workflow
 scripts/liubang_live.sh day
 scripts/liubang_live.sh loop
+scripts/liubang_live.sh gex AMD --refresh
 scripts/liubang_live.sh dashboard-open
 scripts/liubang_live.sh review-open
 scripts/liubang_live.sh positions
@@ -59,6 +61,7 @@ scripts/liubang_live.sh positions
 
 - `config/research_universe_dynamic.json`
 - `--dynamic-source none`
+- `--positions-file data/paper_positions.json`
 - `--hard-stop-pct 0.03`
 - `--symbol-cooldown-days 3`
 - `--cooldown-journal-file data/paper_trade_journal.csv`
@@ -118,7 +121,7 @@ scripts/liubang_live.sh dashboard-open
 - 最新 workflow 状态和最近 10 次 tick 历史
 - signals 是否对当前美东交易日有效
 - trigger 状态分布和未触发原因聚合
-- watchlist、paper 持仓、paper 日志
+- watchlist、当周 GEX、paper 持仓、paper 日志
 - 有开放 paper 持仓时显示浮动 R、距离止损和距离目标
 - 当前建议运行的 shell 命令
 
@@ -162,6 +165,14 @@ scripts/liubang_live.sh review --review-date 2026-05-20
 ```bash
 .venv/bin/python scripts/preflight.py
 ```
+
+计算单个 ticker 的本周 GEX：
+
+```bash
+scripts/liubang_live.sh gex AMD --refresh
+```
+
+该值来自 Schwab option chain 的 `gamma` 和 `openInterest`，按 `call` 为正、`put` 为负计算，单位是标的上涨 1% 时的美元 gamma exposure 代理值。它只作为当日 watchlist 的风险/上下文，不会自动下单。
 
 生成默认每日信号：
 

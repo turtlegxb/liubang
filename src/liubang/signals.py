@@ -381,12 +381,7 @@ def format_signal_summary(report: dict[str, Any], report_path: Path) -> str:
         news = item.get("recent_news") or []
         news_note = f" news={len(news)}" if news else ""
         source_note = f" source={item.get('source')}" if item.get("source") != "fixed_core" else ""
-        options = item.get("options_context") or {}
-        options_note = (
-            f" pc_oi={options['put_call_oi_ratio']}"
-            if options.get("put_call_oi_ratio") is not None
-            else ""
-        )
+        options_note = compact_options_note(item.get("options_context") or {})
         risk_note = compact_context_risk_note(item)
         plan = item.get("trade_plan") or {}
         shares_note = (
@@ -442,12 +437,7 @@ def format_discord_message(report: dict[str, Any]) -> str:
         news = item.get("recent_news") or []
         headline = f" | {truncate(news[0]['title'], 80)}" if news else ""
         source_note = " dyn" if item.get("source") == "dynamic_yfinance" else ""
-        options = item.get("options_context") or {}
-        options_note = (
-            f" pc_oi={options['put_call_oi_ratio']}"
-            if options.get("put_call_oi_ratio") is not None
-            else ""
-        )
+        options_note = compact_options_note(item.get("options_context") or {})
         risk_note = compact_context_risk_note(item)
         plan = item.get("trade_plan") or {}
         shares_note = (
@@ -491,6 +481,13 @@ def attach_options_context(
             if options_risk["level"] != "low":
                 flag_names = ",".join(flag["name"] for flag in options_risk["flags"])
                 item.setdefault("risk_notes", []).append(f"options_risk={options_risk['level']} flags={flag_names}")
+            weekly_gex = summary.get("weekly_gex") or {}
+            if weekly_gex:
+                regime = weekly_gex.get("regime")
+                if regime and regime != "neutral":
+                    item.setdefault("risk_notes", []).append(f"weekly_gex={regime}")
+                for gex_note in weekly_gex.get("risk_notes") or []:
+                    item.setdefault("risk_notes", []).append(f"weekly_gex_{gex_note}")
         elif symbol in errors_by_symbol:
             item.setdefault("risk_notes", []).append("options_error")
             item["options_error"] = errors_by_symbol[symbol]
@@ -520,8 +517,22 @@ def compact_context_risk_note(item: dict[str, Any]) -> str:
     parts = []
     news_risk = item.get("news_risk") or {}
     options_risk = item.get("options_risk") or {}
+    weekly_gex = ((item.get("options_context") or {}).get("weekly_gex") or {})
     if news_risk.get("level") in {"elevated", "high"}:
         parts.append(f"news_risk={news_risk.get('level')}")
     if options_risk.get("level") in {"elevated", "high"}:
         parts.append(f"options_risk={options_risk.get('level')}")
+    if weekly_gex.get("regime") in {"positive", "negative"}:
+        parts.append(f"gex={weekly_gex.get('regime')}")
+    return (" " + " ".join(parts)) if parts else ""
+
+
+def compact_options_note(options: dict[str, Any]) -> str:
+    parts = []
+    pc_oi = options.get("put_call_oi_ratio")
+    if pc_oi is not None:
+        parts.append(f"pc_oi={pc_oi}")
+    weekly_gex = options.get("weekly_gex") or {}
+    if weekly_gex.get("regime"):
+        parts.append(f"gex={weekly_gex.get('regime')}")
     return (" " + " ".join(parts)) if parts else ""

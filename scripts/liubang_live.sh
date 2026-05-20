@@ -17,6 +17,7 @@ LOOP_ARGS=()
 PROFILE_ARGS=(
   --universe config/research_universe_dynamic.json
   --dynamic-source none
+  --positions-file data/paper_positions.json
   --hard-stop-pct 0.03
   --symbol-cooldown-days 3
   --cooldown-journal-file data/paper_trade_journal.csv
@@ -48,6 +49,7 @@ Commands:
   positions          监控 data/manual_positions.json 并推送 Discord
   paper-positions    监控 data/paper_positions.json 并推送 Discord
   paper-summary      汇总 data/paper_trade_journal.csv
+  gex                计算单个 ticker 的本周 GEX
   dashboard          生成本地 HTML 监控面板
   dashboard-open     生成并打开本地 HTML 监控面板
   review             生成盘后复盘 JSON 和 HTML
@@ -64,6 +66,7 @@ Examples:
   scripts/liubang_live.sh workflow
   scripts/liubang_live.sh day
   scripts/liubang_live.sh loop
+  scripts/liubang_live.sh gex AMD --refresh
   scripts/liubang_live.sh dashboard-open
   scripts/liubang_live.sh review-open
   scripts/liubang_live.sh positions
@@ -264,6 +267,9 @@ case "$command" in
       --report-prefix paper_journal \
       "$@"
     render_dashboard_quiet
+    ;;
+  gex)
+    "$PYTHON_BIN" scripts/calc_weekly_gex.py "$@"
     ;;
   dashboard)
     "$PYTHON_BIN" scripts/render_dashboard.py "$@"

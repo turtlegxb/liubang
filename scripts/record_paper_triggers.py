@@ -50,6 +50,7 @@ def main() -> int:
     print(f"Paper journal: {args.paper_journal}")
     print(f"New positions: {len(update['new_positions'])}")
     print(f"Skipped duplicates: {len(update['skipped_duplicates'])}")
+    print(f"Skipped portfolio full: {len(update['skipped_portfolio_full'])}")
     print(f"Report: {report_path}")
     return 0
 
@@ -98,8 +99,11 @@ def build_paper_update(
         for item in existing_payload.get("positions", [])
         if int(item.get("remaining_shares", item.get("shares", 0)) or 0) > 0
     }
+    portfolio_guard = paper_portfolio_guard_status(trigger_report.get("portfolio_guard") or {}, len(open_symbols))
+    remaining_slots = portfolio_guard.get("remaining_slots")
     new_positions = []
     skipped_duplicates = []
+    skipped_portfolio_full = []
     skipped_invalid = []
     for item in trigger_report.get("evaluations", []):
         action = item.get("action")
@@ -127,16 +131,62 @@ def build_paper_update(
                 }
             )
             continue
+        if remaining_slots is not None and remaining_slots <= 0:
+            skipped_portfolio_full.append(
+                {
+                    "symbol": symbol,
+                    "entry_date": entry_key[1],
+                    "reason": portfolio_guard.get("block_reason") or "no_opening_slots_available",
+                    "max_positions": portfolio_guard.get("max_positions"),
+                    "open_positions": len(open_symbols),
+                }
+            )
+            continue
         new_positions.append(position)
         open_symbols.add(symbol)
         paper_journal_entries.add(entry_key)
+        if remaining_slots is not None:
+            remaining_slots -= 1
+            portfolio_guard["remaining_slots"] = remaining_slots
     return {
         "generated_at": datetime.now(UTC).isoformat(),
         "mode": "paper_observation_positions",
         "source_triggers_report": str(source_path) if source_path else None,
+        "portfolio_guard": portfolio_guard,
         "new_positions": new_positions,
         "skipped_duplicates": skipped_duplicates,
+        "skipped_portfolio_full": skipped_portfolio_full,
         "skipped_invalid": skipped_invalid,
+    }
+
+
+def paper_portfolio_guard_status(raw_guard: dict[str, Any], open_position_count: int) -> dict[str, Any]:
+    max_positions = optional_int(raw_guard.get("max_positions"))
+    available_slots = optional_int(raw_guard.get("available_slots"))
+    block_reason = None
+    if raw_guard.get("risk_throttle_allows_new_entries") is False:
+        remaining_slots = 0
+        block_reason = "risk_throttle_blocks_new_entries"
+    elif max_positions is not None:
+        remaining_slots = max(0, max_positions - open_position_count)
+        if remaining_slots <= 0:
+            block_reason = "no_opening_slots_available"
+    elif available_slots is not None:
+        remaining_slots = max(0, available_slots)
+        if remaining_slots <= 0:
+            block_reason = "no_opening_slots_available"
+    elif raw_guard.get("allow_new_entries") is False:
+        remaining_slots = 0
+        block_reason = "portfolio_guard_disallows_new_entries"
+    else:
+        remaining_slots = None
+    return {
+        "source": raw_guard.get("source"),
+        "max_positions": max_positions,
+        "signal_available_slots": available_slots,
+        "open_paper_positions": open_position_count,
+        "remaining_slots": remaining_slots,
+        "block_reason": block_reason,
     }
 
 
@@ -176,6 +226,15 @@ def as_float(value: Any) -> float:
         return float(value)
     except (TypeError, ValueError):
         return 0.0
+
+
+def optional_int(value: Any) -> int | None:
+    try:
+        if value is None or value == "":
+            return None
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:

@@ -59,6 +59,7 @@ def build_rows(report: dict[str, Any]) -> list[dict[str, Any]]:
         news_risk = item.get("news_risk") or {}
         options_risk = item.get("options_risk") or {}
         options = item.get("options_context") or {}
+        weekly_gex = options.get("weekly_gex") or {}
         source_metadata = item.get("source_metadata") or {}
         rows.append(
             {
@@ -92,6 +93,10 @@ def build_rows(report: dict[str, Any]) -> list[dict[str, Any]]:
                 "news_risk": news_risk.get("level"),
                 "options_risk": options_risk.get("level"),
                 "put_call_oi_ratio": options.get("put_call_oi_ratio"),
+                "weekly_gex_regime": weekly_gex.get("regime"),
+                "weekly_net_gex": weekly_gex.get("net_gex"),
+                "weekly_call_wall": weekly_gex.get("call_wall"),
+                "weekly_put_wall": weekly_gex.get("put_wall"),
                 "recent_news_count": len(news),
                 "top_news_headline": news[0].get("title") if news else None,
             }
@@ -132,6 +137,10 @@ def write_rows(path: Path, rows: list[dict[str, Any]]) -> None:
         "news_risk",
         "options_risk",
         "put_call_oi_ratio",
+        "weekly_gex_regime",
+        "weekly_net_gex",
+        "weekly_call_wall",
+        "weekly_put_wall",
         "recent_news_count",
         "top_news_headline",
     ]

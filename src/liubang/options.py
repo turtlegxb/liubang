@@ -101,11 +101,23 @@ def collect_option_rows(expiration_map: dict[str, Any], side: str) -> list[dict[
                 mid = (bid + ask) / 2 if bid > 0 and ask > 0 else 0.0
                 rows.append(
                     {
+                        "symbol": contract.get("symbol"),
                         "side": side,
+                        "put_call": contract.get("putCall"),
                         "expiration": expiration,
+                        "expiration_date": contract.get("expirationDate"),
+                        "days_to_expiration": int(number(contract.get("daysToExpiration"))),
                         "strike": float(strike),
                         "bid": bid,
                         "ask": ask,
+                        "last": number(contract.get("last")),
+                        "mark": number(contract.get("mark")),
+                        "delta": number(contract.get("delta")),
+                        "gamma": number(contract.get("gamma")),
+                        "theta": number(contract.get("theta")),
+                        "vega": number(contract.get("vega")),
+                        "volatility": number(contract.get("volatility")),
+                        "multiplier": number(contract.get("multiplier")),
                         "spread_pct": ((ask - bid) / mid * 100.0) if mid else 0.0,
                         "volume": int(number(contract.get("totalVolume"))),
                         "open_interest": int(number(contract.get("openInterest"))),

@@ -24,6 +24,7 @@ from liubang.backtest import BacktestParams, summarize_trades, symbol_cooldown_e
 from liubang.cli_utils import load_zshrc_env_vars, parse_null_delimited_env, summarize_history_sources
 from liubang.defaults import DEFAULT_HARD_STOP_PCT, DEFAULT_MAX_PULLBACK_PCT, DEFAULT_MIN_SCORE
 from liubang.journal import aggregate_trades, parse_journal_lot, summarize_journal
+from liubang.gex import summarize_weekly_gex
 from liubang.market_data import YFinanceHistoryCache, payload_has_candles
 import liubang.market_data as market_data_module
 from liubang.news import parse_datetime
@@ -83,6 +84,7 @@ def main() -> int:
     test_strategy_validation_concentration_gate()
     test_daily_proxy_parse_bars()
     test_options_summary()
+    test_weekly_gex_summary()
     test_signal_option_attachment()
     test_watchlist_concentration()
     test_signal_symbol_cooldown()
@@ -104,6 +106,7 @@ def main() -> int:
     test_duplicate_position_blocks_actionable_trigger()
     test_observation_only_blocks_manual_trigger_template()
     test_paper_trigger_update_payload()
+    test_paper_trigger_update_respects_opening_slots()
     test_paper_action_update_partial_and_exit()
     test_trigger_template_export_payload()
     test_position_monitor_target()
@@ -527,14 +530,56 @@ def test_options_summary() -> None:
     assert summary["put_call_oi_ratio"] == 0.5
 
 
+def test_weekly_gex_summary() -> None:
+    chain = {
+        "symbol": "AAPL",
+        "source": "test",
+        "payload": {
+            "underlyingPrice": 100.0,
+            "callExpDateMap": {
+                "2026-05-22:2": {
+                    "100.0": [{"gamma": 0.05, "openInterest": 10, "multiplier": 100}],
+                    "105.0": [{"gamma": 0.03, "openInterest": 30, "multiplier": 100}],
+                }
+            },
+            "putExpDateMap": {
+                "2026-05-22:2": {
+                    "95.0": [{"gamma": 0.04, "openInterest": 20, "multiplier": 100}]
+                }
+            },
+        },
+    }
+    summary = summarize_weekly_gex(chain, as_of_date=date(2026, 5, 20), max_strike_distance_pct=0.2)
+    assert summary["week_end_date"] == "2026-05-22"
+    assert summary["contract_count"] == 3
+    assert summary["call_gex"] == 14000.0
+    assert summary["put_gex"] == -8000.0
+    assert summary["net_gex"] == 6000.0
+    assert summary["regime"] == "positive"
+    assert summary["call_wall"] == 105.0
+    assert summary["put_wall"] == 95.0
+
+
 def test_signal_option_attachment() -> None:
     report = {"watchlist": [{"symbol": "AAPL", "risk_notes": []}]}
     attach_options_context(
         report,
-        summaries_by_symbol={"AAPL": {"symbol": "AAPL", "put_call_oi_ratio": 0.5}},
+        summaries_by_symbol={
+            "AAPL": {
+                "symbol": "AAPL",
+                "put_call_oi_ratio": 0.5,
+                "weekly_gex": {
+                    "regime": "negative",
+                    "net_gex": -1000.0,
+                    "risk_notes": ["negative_weekly_gamma_vol_expansion"],
+                },
+            }
+        },
     )
     assert report["watchlist"][0]["options_context"]["put_call_oi_ratio"] == 0.5
     assert "options_pc_oi=0.5" in report["watchlist"][0]["risk_notes"]
+    assert "weekly_gex=negative" in report["watchlist"][0]["risk_notes"]
+    assert "weekly_gex_negative_weekly_gamma_vol_expansion" in report["watchlist"][0]["risk_notes"]
 
 
 def test_watchlist_concentration() -> None:
@@ -603,7 +648,15 @@ def test_watchlist_csv_rows() -> None:
                     "trade_plan": {"suggested_shares": 10},
                     "recent_news": [{"title": "Headline"}],
                     "news_risk": {"level": "low"},
-                    "options_context": {"put_call_oi_ratio": 0.5},
+                    "options_context": {
+                        "put_call_oi_ratio": 0.5,
+                        "weekly_gex": {
+                            "regime": "positive",
+                            "net_gex": 1200000.0,
+                            "call_wall": 105.0,
+                            "put_wall": 95.0,
+                        },
+                    },
                     "options_risk": {"level": "low"},
                 }
             ],
@@ -615,6 +668,8 @@ def test_watchlist_csv_rows() -> None:
     assert rows[0]["suggested_shares"] == 10
     assert rows[0]["watchlist_top_theme"] == "megacap_tech"
     assert rows[0]["top_news_headline"] == "Headline"
+    assert rows[0]["weekly_gex_regime"] == "positive"
+    assert rows[0]["weekly_call_wall"] == 105.0
 
 
 def test_news_datetime_parser() -> None:
@@ -1207,6 +1262,62 @@ def test_paper_trigger_update_payload() -> None:
     assert reentry_blocked["skipped_duplicates"][0]["reason"] == "symbol_already_recorded_for_entry_date"
 
 
+def test_paper_trigger_update_respects_opening_slots() -> None:
+    trigger_report = {
+        "portfolio_guard": {"max_positions": 2, "available_slots": 1},
+        "evaluations": [
+            {
+                "symbol": "AAPL",
+                "triggered": True,
+                "action": "observe_only_no_manual_entry",
+                "planned_entry_date": "2026-05-20",
+                "trade_plan": {
+                    "entry_price_reference": 10.5,
+                    "stop_price": 9.9,
+                    "first_target_price": 11.1,
+                    "suggested_shares": 100,
+                },
+            },
+            {
+                "symbol": "MSFT",
+                "triggered": True,
+                "action": "observe_only_no_manual_entry",
+                "planned_entry_date": "2026-05-20",
+                "trade_plan": {
+                    "entry_price_reference": 20.5,
+                    "stop_price": 19.9,
+                    "first_target_price": 21.1,
+                    "suggested_shares": 100,
+                },
+            },
+        ],
+    }
+    update = build_paper_update(
+        trigger_report,
+        existing_payload={"positions": [{"symbol": "NVDA", "shares": 10, "remaining_shares": 10}]},
+        paper_journal_entries=set(),
+        source_path=Path("triggers_test.json"),
+    )
+    assert len(update["new_positions"]) == 1
+    assert update["new_positions"][0]["symbol"] == "AAPL"
+    assert update["skipped_portfolio_full"][0]["symbol"] == "MSFT"
+    assert update["skipped_portfolio_full"][0]["reason"] == "no_opening_slots_available"
+
+    full_update = build_paper_update(
+        trigger_report,
+        existing_payload={
+            "positions": [
+                {"symbol": "NVDA", "shares": 10, "remaining_shares": 10},
+                {"symbol": "TSLA", "shares": 10, "remaining_shares": 10},
+            ]
+        },
+        paper_journal_entries=set(),
+        source_path=Path("triggers_test.json"),
+    )
+    assert full_update["new_positions"] == []
+    assert len(full_update["skipped_portfolio_full"]) == 2
+
+
 def test_paper_action_update_partial_and_exit() -> None:
     update = build_paper_action_update(
         positions_payload={
@@ -1380,6 +1491,14 @@ def test_dashboard_model_and_html() -> None:
                         "close": 100.0,
                         "source": "fixed_core",
                         "trade_plan": {"suggested_shares": 10},
+                        "options_context": {
+                            "weekly_gex": {
+                                "regime": "positive",
+                                "net_gex": 1200000.0,
+                                "call_wall": 105.0,
+                                "put_wall": 95.0,
+                            }
+                        },
                     }
                 ],
             }
@@ -1429,6 +1548,7 @@ def test_dashboard_model_and_html() -> None:
                     {
                         "symbol": "AAPL",
                         "entry_date": "2026-05-20",
+                        "entry_time_et": "2026-05-20T09:40:00-04:00",
                         "entry_price": 100.0,
                         "shares": 10,
                         "remaining_shares": 10,
@@ -1459,14 +1579,22 @@ def test_dashboard_model_and_html() -> None:
     assert model["triggers"]["reason_counts"]["waiting"] == 1
     assert model["watchlist_market"]["with_market_data"] == 1
     assert model["watchlist_market"]["rows"][0]["intraday_change_pct"] == 0.01
+    assert model["watchlist_market"]["rows"][0]["weekly_gex_regime"] == "positive"
+    assert model["watchlist_market"]["rows"][0]["weekly_call_wall"] == 105.0
+    assert model["recent_orders"]["order_count"] == 1
+    assert model["recent_orders"]["orders"][0]["side"] == "BUY"
     html_text = render_dashboard_html(model, refresh_seconds=10)
     assert "Liubang Monitor" in html_text
     assert "当前操作" in html_text
+    assert "最近订单" in html_text
+    assert "BUY" in html_text
     assert "Watchlist 今日行情" in html_text
     assert "最近 10 次 workflow/tick" in html_text
     assert "今日有效" in html_text
     assert "AAPL" in html_text
     assert "+1.00%" in html_text
+    assert "Call Wall" in html_text
+    assert "$1.20M" in html_text
     assert "+0.33R" in html_text
     assert 'http-equiv="refresh" content="10"' in html_text
 

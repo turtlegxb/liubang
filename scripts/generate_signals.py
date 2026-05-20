@@ -42,6 +42,7 @@ from liubang.dynamic_universe import (
 )
 from liubang.earnings import DEFAULT_EARNINGS_CACHE_PATH
 from liubang.journal import aggregate_trades, load_journal_lots
+from liubang.gex import summarize_weekly_gex
 from liubang.options import DEFAULT_OPTIONS_CACHE_DIR, SchwabOptionChainCache, summarize_option_chain
 from liubang.portfolio import portfolio_guard_from_file
 from liubang.risk_throttle import RiskThrottleInputs, risk_throttle_from_journal
@@ -88,6 +89,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--options-cache-dir", default=str(DEFAULT_OPTIONS_CACHE_DIR))
     parser.add_argument("--options-strike-count", type=int, default=10)
     parser.add_argument("--options-max-dte", type=int, default=45)
+    parser.add_argument("--weekly-gex-source", choices=["schwab", "none"], default="schwab")
+    parser.add_argument("--refresh-gex", action="store_true")
+    parser.add_argument("--weekly-gex-strike-count", type=int, default=50)
+    parser.add_argument("--weekly-gex-max-dte", type=int, default=7)
+    parser.add_argument("--weekly-gex-max-strike-distance-pct", type=float, default=0.15)
     parser.add_argument("--refresh", action="store_true", help="Refresh Schwab cache before scoring.")
     parser.add_argument("--extended-hours", action="store_true", help="Request extended-hours history.")
     parser.add_argument("--cache-dir", default="data/cache")
@@ -287,20 +293,47 @@ def enrich_with_schwab_options(report: dict, args: argparse.Namespace) -> dict:
         strike_count=args.options_strike_count,
         max_dte=args.options_max_dte,
     )
+    gex_cache = (
+        SchwabOptionChainCache(
+            adapter=adapter,
+            cache_dir=Path(args.options_cache_dir),
+            strike_count=args.weekly_gex_strike_count,
+            max_dte=args.weekly_gex_max_dte,
+        )
+        if args.weekly_gex_source == "schwab"
+        else None
+    )
     summaries = {}
     errors = {}
     for item in report.get("watchlist", []):
         symbol = item["symbol"]
         try:
             chain = cache.get_chain(symbol, refresh=args.refresh_options)
-            summaries[symbol] = summarize_option_chain(chain)
+            summary = summarize_option_chain(chain)
+            if gex_cache is not None:
+                try:
+                    gex_chain = gex_cache.get_chain(symbol, refresh=args.refresh_options or args.refresh_gex)
+                    summary["weekly_gex"] = summarize_weekly_gex(
+                        gex_chain,
+                        max_strike_distance_pct=args.weekly_gex_max_strike_distance_pct,
+                    )
+                except Exception as exc:
+                    summary["weekly_gex_error"] = str(exc)[:300]
+                    errors[f"{symbol}:weekly_gex"] = str(exc)[:300]
+            summaries[symbol] = summary
         except Exception as exc:
             errors[symbol] = str(exc)[:300]
-    return attach_options_context(
+    updated = attach_options_context(
         report,
         summaries_by_symbol=summaries,
         errors_by_symbol=errors,
     )
+    options_status = updated.setdefault("options", {})
+    options_status["weekly_gex_source"] = args.weekly_gex_source
+    options_status["weekly_gex_symbols"] = sorted(
+        symbol for symbol, summary in summaries.items() if summary.get("weekly_gex")
+    )
+    return updated
 
 
 def apply_symbol_cooldown(report: dict, args: argparse.Namespace) -> dict:

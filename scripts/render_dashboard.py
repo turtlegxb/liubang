@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import re
 import subprocess
 import sys
 from datetime import UTC, date, datetime, time
@@ -89,6 +90,7 @@ def build_dashboard_model(
         "paper_position_monitor": summarize_position_monitor(paper_position_report_path, paper_position_report),
         "paper_update": summarize_paper_update(paper_update_path, paper_update),
         "paper_journal": paper_journal,
+        "recent_orders": summarize_recent_orders(paper_positions, paper_journal),
     }
 
 
@@ -192,6 +194,7 @@ def load_paper_journal(path: Path) -> dict[str, Any]:
             "lot_count": 0,
             "realized_pnl": 0.0,
             "trades": [],
+            "lots": [],
         }
     try:
         lots = load_journal_lots(path)
@@ -205,10 +208,29 @@ def load_paper_journal(path: Path) -> dict[str, Any]:
             "lot_count": 0,
             "realized_pnl": 0.0,
             "trades": [],
+            "lots": [],
         }
     summary["status"] = "loaded"
     summary["path"] = str(path)
+    summary["lots"] = [journal_lot_to_order_source(lot) for lot in lots]
     return summary
+
+
+def journal_lot_to_order_source(lot: Any) -> dict[str, Any]:
+    return {
+        "trade_id": lot.trade_id,
+        "symbol": lot.symbol,
+        "side": lot.side,
+        "entry_date": lot.entry_date.isoformat(),
+        "exit_date": lot.exit_date.isoformat(),
+        "entry_price": lot.entry_price,
+        "exit_price": lot.exit_price,
+        "shares": lot.shares,
+        "fees": lot.fees,
+        "pnl": round(lot.pnl, 2),
+        "r_multiple": round(lot.r_multiple, 4) if lot.r_multiple is not None else None,
+        "notes": lot.notes,
+    }
 
 
 def summarize_workflow(path: Path | None, payload: dict[str, Any] | None) -> dict[str, Any]:
@@ -310,6 +332,7 @@ def summarize_watchlist_market(signals: dict[str, Any], triggers: dict[str, Any]
     for index, signal in enumerate(signals.get("watchlist", []) or [], start=1):
         symbol = str(signal.get("symbol") or "").upper()
         evaluation = evaluations_by_symbol.get(symbol, {})
+        weekly_gex = ((signal.get("options_context") or {}).get("weekly_gex") or {})
         signal_close = optional_float(signal.get("close"))
         latest_close = optional_float(evaluation.get("last_close"))
         if latest_close is not None:
@@ -338,6 +361,10 @@ def summarize_watchlist_market(signals: dict[str, Any], triggers: dict[str, Any]
                 "reason": evaluation.get("reason"),
                 "score": signal.get("total_score"),
                 "pullback_pct": signal.get("pullback_pct"),
+                "weekly_gex_regime": weekly_gex.get("regime"),
+                "weekly_net_gex": optional_float(weekly_gex.get("net_gex")),
+                "weekly_call_wall": optional_float(weekly_gex.get("call_wall")),
+                "weekly_put_wall": optional_float(weekly_gex.get("put_wall")),
             }
         )
     return {
@@ -381,6 +408,58 @@ def summarize_paper_update(path: Path | None, payload: dict[str, Any] | None) ->
         "duplicate_count": len(payload.get("skipped_duplicates") or []),
         "invalid_count": len(payload.get("skipped_invalid") or []),
         "source_triggers_report": payload.get("source_triggers_report"),
+    }
+
+
+def summarize_recent_orders(paper_positions: dict[str, Any], paper_journal: dict[str, Any], *, limit: int = 12) -> dict[str, Any]:
+    orders = []
+    for position in paper_positions.get("open_positions") or []:
+        symbol = str(position.get("symbol") or "").upper()
+        if not symbol:
+            continue
+        order_time = order_time_from_position(position)
+        orders.append(
+            {
+                "time": order_time,
+                "symbol": symbol,
+                "side": "BUY",
+                "action": "paper_entry",
+                "status": "open",
+                "quantity": as_int(position.get("shares")),
+                "price": as_float(position.get("entry_price")),
+                "pnl": None,
+                "source": "paper_positions",
+                "sort_key": order_sort_key(order_time),
+            }
+        )
+
+    for lot in paper_journal.get("lots") or []:
+        symbol = str(lot.get("symbol") or "").upper()
+        if not symbol:
+            continue
+        notes = str(lot.get("notes") or "")
+        order_time = report_time_from_text(notes) or exit_time_from_lot(lot)
+        orders.append(
+            {
+                "time": order_time,
+                "symbol": symbol,
+                "side": "SELL",
+                "action": exit_action_from_notes(notes),
+                "status": "closed",
+                "quantity": as_int(lot.get("shares")),
+                "price": as_float(lot.get("exit_price")),
+                "pnl": optional_float(lot.get("pnl")),
+                "source": "paper_journal",
+                "sort_key": order_sort_key(order_time),
+            }
+        )
+
+    orders = sorted(orders, key=lambda item: item.get("sort_key", ""), reverse=True)
+    for order in orders:
+        order.pop("sort_key", None)
+    return {
+        "orders": orders[:limit],
+        "order_count": len(orders),
     }
 
 
@@ -723,6 +802,7 @@ def render_dashboard_html(model: dict[str, Any], *, refresh_seconds: int) -> str
       </div>
       <div class="stack">
         {render_market_panel(model)}
+        {render_recent_orders_panel(model.get("recent_orders") or {})}
         {render_paper_positions_panel(paper_positions, position_monitor)}
         {render_paper_journal_panel(paper_journal, paper_update)}
       </div>
@@ -937,6 +1017,10 @@ def render_watchlist_market_panel(market: dict[str, Any]) -> str:
           <td>{h(format_price(item.get('trigger_price_reference')))}</td>
           <td>{h(format_signed_pct(item.get('distance_to_trigger_pct')))}</td>
           <td>{h(format_signed_pct(item.get('distance_to_stop_pct')))}</td>
+          <td>{gex_pill(item.get('weekly_gex_regime'))}</td>
+          <td>{h(format_compact_money(item.get('weekly_net_gex'), signed=True))}</td>
+          <td>{h(format_price(item.get('weekly_call_wall')))}</td>
+          <td>{h(format_price(item.get('weekly_put_wall')))}</td>
           <td>{h(format_time_et(item.get('last_bar_time_et')))}</td>
         </tr>
         """
@@ -946,7 +1030,7 @@ def render_watchlist_market_panel(market: dict[str, Any]) -> str:
         f"""
         <div class="table-wrap">
           <table>
-            <thead><tr><th>#</th><th>标的</th><th>状态</th><th>信号收盘</th><th>最新 5m</th><th>涨跌</th><th>VWAP</th><th>触发参考</th><th>距触发</th><th>距止损</th><th>最后 K</th></tr></thead>
+            <thead><tr><th>#</th><th>标的</th><th>状态</th><th>信号收盘</th><th>最新 5m</th><th>涨跌</th><th>VWAP</th><th>触发参考</th><th>距触发</th><th>距止损</th><th>GEX</th><th>净 GEX</th><th>Call Wall</th><th>Put Wall</th><th>最后 K</th></tr></thead>
             <tbody>{table_rows}</tbody>
           </table>
         </div>
@@ -1042,6 +1126,48 @@ def render_paper_positions_panel(paper: dict[str, Any], monitor: dict[str, Any])
     """
 
 
+def render_recent_orders_panel(recent_orders: dict[str, Any]) -> str:
+    orders = recent_orders.get("orders") or []
+    rows = "\n".join(
+        f"""
+        <tr>
+          <td>{h(format_order_time(item.get('time')))}</td>
+          <td class="mono">{h(item.get('symbol'))}</td>
+          <td>{order_side_pill(item.get('side'))}</td>
+          <td>{h(item.get('action'))}</td>
+          <td>{h(item.get('quantity'))}</td>
+          <td>{h(format_price(item.get('price')))}</td>
+          <td>{h(format_money(item.get('pnl')) if item.get('pnl') is not None else 'n/a')}</td>
+          <td>{status_pill(item.get('status'))}</td>
+        </tr>
+        """
+        for item in orders
+    )
+    body = (
+        f"""
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>时间</th><th>标的</th><th>方向</th><th>类型</th><th>数量</th><th>价格</th><th>PnL</th><th>状态</th></tr></thead>
+            <tbody>{rows}</tbody>
+          </table>
+        </div>
+        """
+        if rows
+        else '<div class="empty">暂无 paper 订单。</div>'
+    )
+    return f"""
+      <section class="panel">
+        <div class="panel-head">
+          <h2>最近订单</h2>
+          <span class="pill info">{h(recent_orders.get('order_count', 0))}</span>
+        </div>
+        <div class="panel-body">
+          {body}
+        </div>
+      </section>
+    """
+
+
 def render_paper_position_row(position: dict[str, Any], evaluation: dict[str, Any] | None) -> str:
     symbol = str(position.get("symbol") or "").upper()
     status = evaluation.get("status") if evaluation else "open"
@@ -1128,6 +1254,12 @@ def status_pill(status: Any) -> str:
     return f'<span class="pill {tone_for_status(raw)}">{h(raw)}</span>'
 
 
+def order_side_pill(side: Any) -> str:
+    raw = str(side or "n/a").upper()
+    tone = "good" if raw == "BUY" else "warn" if raw == "SELL" else "muted"
+    return f'<span class="pill {tone}">{h(raw)}</span>'
+
+
 def tone_for_status(status: str) -> str:
     normalized = status.lower()
     if normalized in {"ok", "loaded", "hold", "open", "triggered"}:
@@ -1204,6 +1336,20 @@ def format_money(value: Any) -> str:
     return f"${number:,.2f}"
 
 
+def format_compact_money(value: Any, *, signed: bool = False) -> str:
+    number = optional_float(value)
+    if number is None:
+        return "n/a"
+    sign = ""
+    if signed:
+        sign = "+" if number > 0 else "-" if number < 0 else ""
+    absolute = abs(number)
+    for divisor, suffix in ((1_000_000_000, "B"), (1_000_000, "M"), (1_000, "K")):
+        if absolute >= divisor:
+            return f"{sign}${absolute / divisor:.2f}{suffix}"
+    return f"{sign}${absolute:.0f}"
+
+
 def format_price(value: Any) -> str:
     number = optional_float(value)
     if number is None:
@@ -1218,12 +1364,28 @@ def format_time_et(value: Any) -> str:
     return parsed.astimezone(EASTERN).strftime("%H:%M")
 
 
+def format_order_time(value: Any) -> str:
+    parsed = parse_dt(value)
+    if parsed is None:
+        return str(value or "n/a")
+    return parsed.astimezone(EASTERN).strftime("%m-%d %H:%M ET")
+
+
 def change_pill(value: Any) -> str:
     number = optional_float(value)
     if number is None:
         return '<span class="pill muted">n/a</span>'
     tone = "good" if number > 0 else "bad" if number < 0 else "muted"
     return f'<span class="pill {tone}">{h(format_signed_pct(number))}</span>'
+
+
+def gex_pill(value: Any) -> str:
+    regime = str(value or "").lower()
+    labels = {"positive": "正", "negative": "负", "neutral": "中性"}
+    tones = {"positive": "good", "negative": "bad", "neutral": "muted"}
+    if regime not in labels:
+        return '<span class="pill muted">n/a</span>'
+    return f'<span class="pill {tones[regime]}">{labels[regime]}</span>'
 
 
 def yes_no(value: Any) -> str:
@@ -1311,6 +1473,52 @@ def format_signed_pct(value: float | None) -> str:
     if number is None:
         return "n/a"
     return f"{number * 100:+.2f}%"
+
+
+def order_time_from_position(position: dict[str, Any]) -> str:
+    for key in ("entry_time_et", "entry_bar_time_et"):
+        parsed = parse_dt(position.get(key))
+        if parsed is not None:
+            return parsed.isoformat()
+    entry_date = parse_date(position.get("entry_date"))
+    if entry_date is None:
+        return ""
+    return datetime.combine(entry_date, time(9, 30), tzinfo=EASTERN).isoformat()
+
+
+def exit_time_from_lot(lot: dict[str, Any]) -> str:
+    exit_date = parse_date(lot.get("exit_date"))
+    if exit_date is None:
+        return ""
+    return datetime.combine(exit_date, time(16, 0), tzinfo=EASTERN).isoformat()
+
+
+def report_time_from_text(value: str) -> str | None:
+    match = re.search(r"_(\d{8}_\d{6}_\d{6})\.json", value)
+    if not match:
+        return None
+    try:
+        parsed = datetime.strptime(match.group(1), "%Y%m%d_%H%M%S_%f")
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=UTC).isoformat()
+
+
+def exit_action_from_notes(notes: str) -> str:
+    if "target_1" in notes:
+        return "target_1"
+    if "breakeven" in notes:
+        return "breakeven_stop"
+    if "stop" in notes:
+        return "stop"
+    if "time_exit" in notes:
+        return "time_exit"
+    return "exit"
+
+
+def order_sort_key(value: Any) -> str:
+    parsed = parse_dt(value)
+    return parsed.astimezone(UTC).isoformat() if parsed else ""
 
 
 def relative_change(current: Any, baseline: Any) -> float | None:
