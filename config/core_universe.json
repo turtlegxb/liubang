@@ -1,0 +1,115 @@
+{
+  "name": "liubang_core_v1",
+  "updated_at": "2026-05-20",
+  "description": "Editable first-pass fixed universe for the Liubang short-term pullback strategy. This is a research universe, not a buy list.",
+  "benchmarks": [
+    "SPY",
+    "QQQ"
+  ],
+  "sector_etfs": [
+    "XLK",
+    "SMH"
+  ],
+  "core_symbols": [
+    {
+      "symbol": "AAPL",
+      "theme": "megacap_tech"
+    },
+    {
+      "symbol": "MSFT",
+      "theme": "megacap_tech"
+    },
+    {
+      "symbol": "NVDA",
+      "theme": "ai_semiconductor"
+    },
+    {
+      "symbol": "AMD",
+      "theme": "ai_semiconductor"
+    },
+    {
+      "symbol": "AVGO",
+      "theme": "ai_semiconductor"
+    },
+    {
+      "symbol": "MU",
+      "theme": "memory_semiconductor"
+    },
+    {
+      "symbol": "TSM",
+      "theme": "semiconductor_foundry"
+    },
+    {
+      "symbol": "ASML",
+      "theme": "semiconductor_equipment"
+    },
+    {
+      "symbol": "ARM",
+      "theme": "semiconductor_ip"
+    },
+    {
+      "symbol": "AMZN",
+      "theme": "megacap_internet"
+    },
+    {
+      "symbol": "META",
+      "theme": "megacap_internet"
+    },
+    {
+      "symbol": "GOOGL",
+      "theme": "megacap_internet"
+    },
+    {
+      "symbol": "TSLA",
+      "theme": "active_growth"
+    },
+    {
+      "symbol": "NFLX",
+      "theme": "active_growth"
+    },
+    {
+      "symbol": "PLTR",
+      "theme": "ai_software"
+    },
+    {
+      "symbol": "CRM",
+      "theme": "enterprise_software"
+    },
+    {
+      "symbol": "ORCL",
+      "theme": "enterprise_software"
+    },
+    {
+      "symbol": "ADBE",
+      "theme": "enterprise_software"
+    },
+    {
+      "symbol": "NOW",
+      "theme": "enterprise_software"
+    },
+    {
+      "symbol": "SNOW",
+      "theme": "data_cloud"
+    },
+    {
+      "symbol": "PANW",
+      "theme": "cybersecurity"
+    },
+    {
+      "symbol": "CRWD",
+      "theme": "cybersecurity"
+    },
+    {
+      "symbol": "COIN",
+      "theme": "crypto_beta"
+    },
+    {
+      "symbol": "MSTR",
+      "theme": "crypto_beta"
+    },
+    {
+      "symbol": "SMCI",
+      "theme": "ai_infrastructure"
+    }
+  ]
+}

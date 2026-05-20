@@ -1,0 +1,16 @@
+{
+  "positions": [
+    {
+      "symbol": "AAPL",
+      "entry_date": "2026-05-20",
+      "entry_price": 300.0,
+      "shares": 10,
+      "remaining_shares": 10,
+      "initial_stop_price": 291.0,
+      "current_stop_price": 291.0,
+      "target_price": 309.0,
+      "target_hit": false,
+      "notes": "Example only. Copy this shape to data/manual_positions.json for live monitoring."
+    }
+  ]
+}

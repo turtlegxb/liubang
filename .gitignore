@@ -1,0 +1,41 @@
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+tokens/
+*.token.json
+schwab_token.json
+
+# Local data/cache outputs
+data/raw/
+data/cache/
+data/exports/
+data/dashboard/
+data/reviews/
+data/launchd/
+data/manual_positions.json
+data/paper_positions.json
+data/trade_journal.csv
+data/paper_trade_journal.csv
+logs/
+*.log
+
+# Notebooks
+.ipynb_checkpoints/

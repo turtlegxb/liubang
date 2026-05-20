@@ -1,0 +1,14 @@
+{
+  "name": "manual_earnings_calendar_example",
+  "updated_at": "2026-05-20",
+  "description": "Optional manual override format. Runtime defaults to yfinance cached data in data/cache/earnings_calendar_yfinance.json.",
+  "events": [
+    {
+      "symbol": "AAPL",
+      "date": "2026-07-30",
+      "timing": "amc",
+      "status": "estimated",
+      "source": "manual"
+    }
+  ]
+}
