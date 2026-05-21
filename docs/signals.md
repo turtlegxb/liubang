@@ -79,7 +79,7 @@ HTML 面板默认输出到 `data/dashboard/liubang_dashboard.html`，页面每 3
   --universe config/research_universe_dynamic.json \
   --dynamic-source none \
   --hard-stop-pct 0.03 \
-  --symbol-cooldown-days 3
+  --symbol-cooldown-days 0
 ```
 
 默认评分模式是 `ranked_v2`。下面命令即使不写 `--scoring-mode ranked_v2` 也会使用 v2；显式写出方便确认当前口径：
@@ -89,7 +89,7 @@ HTML 面板默认输出到 `data/dashboard/liubang_dashboard.html`，页面每 3
   --universe config/research_universe_dynamic.json \
   --dynamic-source none \
   --hard-stop-pct 0.03 \
-  --symbol-cooldown-days 3 \
+  --symbol-cooldown-days 0 \
   --scoring-mode ranked_v2
 ```
 
@@ -190,17 +190,17 @@ HTML 面板默认输出到 `data/dashboard/liubang_dashboard.html`，页面每 3
 .venv/bin/python scripts/generate_signals.py --ignore-risk-throttle
 ```
 
-单票冷却用于防止刚退出的股票立刻重新入选。当前观察配置使用 3 个交易日：
+单票冷却用于防止刚退出的股票立刻重新入选。当前 regime-aware v2 观察配置默认不启用单票冷却：
 
 ```bash
-.venv/bin/python scripts/generate_signals.py --symbol-cooldown-days 3
+.venv/bin/python scripts/generate_signals.py --symbol-cooldown-days 0
 ```
 
 默认从 `--journal-file` 读取冷却依据。纸面观察时建议指定纸面日志：
 
 ```bash
 .venv/bin/python scripts/generate_signals.py \
-  --symbol-cooldown-days 3 \
+  --symbol-cooldown-days 0 \
   --cooldown-journal-file data/paper_trade_journal.csv
 ```
 
@@ -216,6 +216,18 @@ python scripts/configure_discord_webhook.py
 
 ```bash
 .venv/bin/python scripts/generate_signals.py --send-discord
+```
+
+默认落盘产物：
+
+- `signals_*.json`：完整信号报告，包含 watchlist、数据质量、仓位保护、风险熔断、期权上下文等
+- `signal_selection_*.json`：精简后的最终筛选结果，适合人工查看或后续流程消费
+- `latest_signal_selection.json`：最新筛选结果的固定路径
+
+如果只想保留完整报告、不写精简筛选结果：
+
+```bash
+.venv/bin/python scripts/generate_signals.py --skip-selection-export
 ```
 
 webhook 写入本地 `.env`，该文件被 git 忽略。
@@ -429,7 +441,7 @@ workflow 会依次运行：
   --universe config/research_universe_dynamic.json \
   --dynamic-source none \
   --hard-stop-pct 0.03 \
-  --symbol-cooldown-days 3 \
+  --symbol-cooldown-days 0 \
   --cooldown-journal-file data/paper_trade_journal.csv \
   --use-cache-for-triggers \
   --export-watchlist-csv \
@@ -525,7 +537,7 @@ plist 写入 `data/launchd/`，该目录被 git 忽略。先检查文件，再�
 .venv/bin/python scripts/export_watchlist_csv.py
 ```
 
-CSV 包含：theme/source metadata、watchlist 集中度、分数组成、计划入场日、entry/stop/target 参考、建议股数、组合保护、风险熔断、新闻风险、期权风险、yfinance 第一条新闻。
+精简 JSON 会由 `generate_signals.py` 自动生成；CSV 需要按需导出。CSV 包含：theme/source metadata、watchlist 集中度、分数组成、计划入场日、entry/stop/target 参考、建议股数、组合保护、风险熔断、新闻风险、期权风险、yfinance 第一条新闻。
 
 旧报告清理 dry-run：
 

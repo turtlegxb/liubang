@@ -63,7 +63,7 @@ scripts/liubang_live.sh positions
 - `--dynamic-source none`
 - `--positions-file data/paper_positions.json`
 - `--hard-stop-pct 0.03`
-- `--symbol-cooldown-days 3`
+- `--symbol-cooldown-days 0`
 - `--cooldown-journal-file data/paper_trade_journal.csv`
 - Discord 推送开启
 
@@ -187,7 +187,7 @@ scripts/liubang_live.sh gex AMD --refresh
   --universe config/research_universe_dynamic.json \
   --dynamic-source none \
   --hard-stop-pct 0.03 \
-  --symbol-cooldown-days 3
+  --symbol-cooldown-days 0
 ```
 
 使用自己的账户和仓位假设：
@@ -201,6 +201,11 @@ scripts/liubang_live.sh gex AMD --refresh
 ```bash
 .venv/bin/python scripts/generate_signals.py --send-discord
 ```
+
+每次生成 signals 都会额外落盘一份精简筛选结果：
+
+- `data/exports/signal_selection_*.json`：本次最终筛选后的 watchlist 和过滤摘要
+- `data/exports/latest_signal_selection.json`：最新一次筛选结果的固定路径
 
 导出最新 watchlist CSV：
 
@@ -255,7 +260,7 @@ cp config/trade_journal.example.csv data/trade_journal.csv
   --universe config/research_universe_dynamic.json \
   --dynamic-source none \
   --hard-stop-pct 0.03 \
-  --symbol-cooldown-days 3 \
+  --symbol-cooldown-days 0 \
   --cooldown-journal-file data/paper_trade_journal.csv \
   --use-cache-for-triggers \
   --export-watchlist-csv \
@@ -336,13 +341,19 @@ sh scripts/liubang_live.sh compare-scoring
 .venv/bin/python scripts/run_research_suite.py \
   --universe config/research_universe_dynamic.json \
   --hard-stop-pct 0.03 \
-  --symbol-cooldown-days 3
+  --symbol-cooldown-days 0
 ```
 
 重新生成扩展研究股票池：
 
 ```bash
-.venv/bin/python scripts/build_research_universe.py --dynamic-limit 30
+sh scripts/liubang_live.sh build-universe
+```
+
+该快捷命令默认刷新 yfinance dynamic screener。等价直接命令：
+
+```bash
+.venv/bin/python scripts/build_research_universe.py --dynamic-limit 30 --refresh-dynamic
 ```
 
 导出回测交易：

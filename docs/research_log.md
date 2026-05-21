@@ -1204,3 +1204,88 @@ weak:
 Regime policy: regime_aware_v2
 Regime policy skipped: <count>
 ```
+
+## 2026-05-21 单票冷却重新评估
+
+用户观察到 2026-05-21 信号为空。复查最新信号报告：
+
+```text
+watchlist_count_before_regime_policy=4
+watchlist_skipped_regime_policy=0
+watchlist_count=0
+symbol_cooldown.blocked_count=4
+```
+
+被挡标的：
+
+```text
+PANW, CSCO, ARM, ASTS
+```
+
+这些标的都因 2026-05-20 paper 交易记录被 `symbol_cooldown_days=3` 冷却到 2026-05-25。说明空信号不是 regime-aware v2 导致，而是旧冷却参数造成。
+
+重新 sweep：
+
+```bash
+.venv/bin/python scripts/sweep_cooldown.py \
+  --universe config/research_universe_dynamic.json \
+  --cooldowns 0,1,2,3,5 \
+  --modes backtest,hourly_proxy,daily_proxy \
+  --hard-stop-pct 0.03
+```
+
+live 止损口径 `hard_stop=0.03` 结果：
+
+```text
+cooldown=0:
+  5m     trades=110 return=13.868% pf=1.5343 dd=3.717%
+  hourly trades=294 return=21.089% pf=1.2772 dd=10.838%
+  daily  trades=856 return=69.627% pf=1.3436 dd=9.075%
+
+cooldown=1:
+  5m     trades=105 return=12.819% pf=1.5340 dd=2.990%
+  hourly trades=285 return=16.430% pf=1.2294 dd=10.907%
+  daily  trades=831 return=56.942% pf=1.2892 dd=7.180%
+
+cooldown=3:
+  5m     trades=98 return=11.442% pf=1.4856 dd=3.467%
+  hourly trades=272 return=21.320% pf=1.3147 dd=8.907%
+  daily  trades=809 return=40.647% pf=1.2060 dd=9.137%
+```
+
+决定：
+
+- 当前 live/research 快捷命令默认改为 `--symbol-cooldown-days 0`
+- 保留组合槽位、总敞口、risk throttle 和 trigger 排序作为主要风控
+- `sweep_cooldown.py` 增加 `--hard-stop-pct`，以后可直接复现 live 止损口径
+
+完整报告：
+
+```text
+data/exports/cooldown_sweep_live_stop_20260521_100228_403281.json
+data/exports/cooldown_sweep_live_stop_20260521_100228_403281.csv
+```
+
+## 2026-05-21 signals 筛选结果落盘
+
+新增精简信号筛选产物，避免只靠完整 `signals_*.json` 或 dashboard 反查最终候选。
+
+每次运行 `generate_signals.py` 会默认写入：
+
+```text
+data/exports/signal_selection_*.json
+data/exports/latest_signal_selection.json
+```
+
+内容包括：
+
+- 来源 `signals_*.json`
+- market regime、scoring mode、data quality、history sources
+- regime policy、symbol cooldown、risk throttle、portfolio guard 摘要
+- 最终 watchlist 的 rank、ticker、分数、入场/止损/目标参考、建议股数、新闻风险、期权风险和 weekly GEX 摘要
+
+如果只想生成完整 signals 报告，可显式加：
+
+```bash
+.venv/bin/python scripts/generate_signals.py --skip-selection-export
+```

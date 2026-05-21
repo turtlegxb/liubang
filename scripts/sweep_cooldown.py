@@ -38,6 +38,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--hourly-interval", default="1h")
     parser.add_argument("--daily-period", default="5y")
     parser.add_argument("--scoring-mode", choices=SCORING_MODES, default=BacktestParams().scoring_mode)
+    parser.add_argument("--hard-stop-pct", type=float, default=BacktestParams().hard_stop_pct)
     parser.add_argument("--earnings-source", choices=["yfinance", "file", "none"], default="yfinance")
     parser.add_argument("--earnings-calendar", default=str(DEFAULT_EARNINGS_CACHE_PATH))
     parser.add_argument("--earnings-limit", type=int, default=64)
@@ -138,7 +139,11 @@ def run_sweep(
             report = run_backtest(
                 history_by_symbol,
                 symbols=symbols,
-                params=BacktestParams(symbol_cooldown_days=cooldown, scoring_mode=args.scoring_mode),
+                params=BacktestParams(
+                    hard_stop_pct=args.hard_stop_pct,
+                    symbol_cooldown_days=cooldown,
+                    scoring_mode=args.scoring_mode,
+                ),
                 earnings_calendar=earnings_calendar,
             )
             append_report(rows, reports, mode="backtest", cooldown=cooldown, report=report)
@@ -156,7 +161,11 @@ def run_sweep(
             report = run_backtest(
                 hourly_history_by_symbol,
                 symbols=symbols,
-                params=BacktestParams(symbol_cooldown_days=cooldown, scoring_mode=args.scoring_mode),
+                params=BacktestParams(
+                    hard_stop_pct=args.hard_stop_pct,
+                    symbol_cooldown_days=cooldown,
+                    scoring_mode=args.scoring_mode,
+                ),
                 earnings_calendar=earnings_calendar,
             )
             report["mode"] = "hourly_proxy_backtest"
@@ -175,7 +184,11 @@ def run_sweep(
             report = run_daily_proxy_backtest(
                 daily_by_symbol=daily_by_symbol,
                 symbols=symbols,
-                params=BacktestParams(symbol_cooldown_days=cooldown, scoring_mode=args.scoring_mode),
+                params=BacktestParams(
+                    hard_stop_pct=args.hard_stop_pct,
+                    symbol_cooldown_days=cooldown,
+                    scoring_mode=args.scoring_mode,
+                ),
                 earnings_calendar=earnings_calendar,
                 period=args.daily_period,
             )
@@ -188,6 +201,7 @@ def run_sweep(
         "cooldowns": list(cooldowns),
         "modes": list(modes),
         "scoring_mode": args.scoring_mode,
+        "hard_stop_pct": args.hard_stop_pct,
         "history_sources": history_sources,
         "rows": rows,
         "reports": reports,

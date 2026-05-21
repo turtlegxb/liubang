@@ -44,7 +44,7 @@ from liubang.portfolio import build_portfolio_guard
 from liubang.positions import ManualPosition, evaluate_position
 from liubang.risk_throttle import RiskThrottleInputs, evaluate_risk_throttle
 from liubang.risk_context import evaluate_news_risk, evaluate_options_risk
-from liubang.signals import attach_options_context, build_watchlist_concentration
+from liubang.signals import attach_options_context, build_signal_selection_payload, build_watchlist_concentration
 from liubang.trade_plan import SizingInputs, build_trade_plan
 from liubang.triggers import evaluate_intraday_trigger, scan_intraday_triggers
 from liubang.universe import load_universe, resolve_symbols
@@ -100,6 +100,7 @@ def main() -> int:
     test_watchlist_concentration()
     test_signal_symbol_cooldown()
     test_watchlist_csv_rows()
+    test_signal_selection_payload()
     test_news_datetime_parser()
     test_news_stale_cache_on_refresh_error()
     test_dynamic_universe_selection()
@@ -845,6 +846,58 @@ def test_watchlist_csv_rows() -> None:
     assert rows[0]["top_news_headline"] == "Headline"
     assert rows[0]["weekly_gex_regime"] == "positive"
     assert rows[0]["weekly_call_wall"] == 105.0
+
+
+def test_signal_selection_payload() -> None:
+    payload = build_signal_selection_payload(
+        {
+            "generated_at": "2026-05-21T14:00:00+00:00",
+            "mode": "market-data-only/manual-orders",
+            "scoring_mode": "ranked_v2",
+            "market_regime": {"date": "2026-05-20", "regime": "neutral"},
+            "regime_policy": {"enabled": True, "mode": "neutral"},
+            "watchlist_count_before_regime_policy": 2,
+            "watchlist_skipped_regime_policy": 1,
+            "watchlist_concentration": {"top_theme": "megacap_tech"},
+            "portfolio_guard": {"allow_new_entries": True},
+            "risk_throttle": {"status": "ok", "allow_new_entries": True},
+            "symbol_cooldown": {"enabled": False},
+            "watchlist": [
+                {
+                    "symbol": "AAPL",
+                    "source": "fixed_core",
+                    "source_metadata": {"theme": "megacap_tech", "reason": "core"},
+                    "planned_entry_date": "2026-05-21",
+                    "market_regime": "neutral",
+                    "scoring_mode": "ranked_v2",
+                    "total_score": 8.5,
+                    "factor_data": {"overlay_score": 7.6, "rs20_rank": 0.8, "atr20_pct": 0.03},
+                    "pullback_pct": 0.025,
+                    "close": 100.0,
+                    "trade_plan": {"suggested_shares": 10, "binding_constraint": "risk"},
+                    "recent_news": [{"title": "Headline"}],
+                    "news_risk": {"level": "low"},
+                    "options_context": {
+                        "weekly_gex": {
+                            "regime": "positive",
+                            "net_gex": 1000000.0,
+                            "call_wall": 105.0,
+                            "put_wall": 95.0,
+                        },
+                    },
+                    "options_risk": {"level": "low"},
+                }
+            ],
+        },
+        signal_report_path=Path("data/exports/signals_test.json"),
+    )
+    assert payload["source_signal_report"] == "data/exports/signals_test.json"
+    assert payload["watchlist_count"] == 1
+    assert payload["symbols"] == ["AAPL"]
+    assert payload["filters"]["watchlist_skipped_regime_policy"] == 1
+    assert payload["watchlist"][0]["rank"] == 1
+    assert payload["watchlist"][0]["theme"] == "megacap_tech"
+    assert payload["watchlist"][0]["weekly_gex_regime"] == "positive"
 
 
 def test_news_datetime_parser() -> None:

@@ -105,19 +105,10 @@
       "theme": "ai_infrastructure"
     },
     {
-      "rank_score": 16.7544,
+      "rank_score": 18.2229,
       "screeners": [
+        "most_actives",
         "day_gainers"
-      ],
-      "short_name": "Sandisk Corporation",
-      "source": "yfinance_screener",
-      "symbol": "SNDK",
-      "theme": "dynamic_yfinance"
-    },
-    {
-      "rank_score": 16.4863,
-      "screeners": [
-        "most_actives"
       ],
       "short_name": "Intel Corporation",
       "source": "yfinance_screener",
@@ -125,20 +116,9 @@
       "theme": "dynamic_yfinance"
     },
     {
-      "rank_score": 15.5823,
+      "rank_score": 14.6469,
       "screeners": [
         "most_actives"
-      ],
-      "short_name": "Alphabet Inc.",
-      "source": "yfinance_screener",
-      "symbol": "GOOG",
-      "theme": "dynamic_yfinance"
-    },
-    {
-      "rank_score": 13.9992,
-      "screeners": [
-        "most_actives",
-        "day_gainers"
       ],
       "short_name": "Marvell Technology, Inc.",
       "source": "yfinance_screener",
@@ -146,47 +126,18 @@
       "theme": "dynamic_yfinance"
     },
     {
-      "rank_score": 12.4702,
+      "rank_score": 13.0685,
       "screeners": [
+        "most_actives",
         "day_gainers"
       ],
-      "short_name": "Eli Lilly and Company",
+      "short_name": "IREN LIMITED",
       "source": "yfinance_screener",
-      "symbol": "LLY",
+      "symbol": "IREN",
       "theme": "dynamic_yfinance"
     },
     {
-      "rank_score": 11.2164,
-      "screeners": [
-        "most_actives"
-      ],
-      "short_name": "Rocket Lab Corporation",
-      "source": "yfinance_screener",
-      "symbol": "RKLB",
-      "theme": "dynamic_yfinance"
-    },
-    {
-      "rank_score": 11.1346,
-      "screeners": [
-        "most_actives"
-      ],
-      "short_name": "Cisco Systems, Inc.",
-      "source": "yfinance_screener",
-      "symbol": "CSCO",
-      "theme": "dynamic_yfinance"
-    },
-    {
-      "rank_score": 11.0892,
-      "screeners": [
-        "most_actives"
-      ],
-      "short_name": "Nebius Group N.V.",
-      "source": "yfinance_screener",
-      "symbol": "NBIS",
-      "theme": "dynamic_yfinance"
-    },
-    {
-      "rank_score": 11.0068,
+      "rank_score": 12.4958,
       "screeners": [
         "most_actives"
       ],
@@ -196,37 +147,37 @@
       "theme": "dynamic_yfinance"
     },
     {
-      "rank_score": 10.5467,
+      "rank_score": 12.3335,
       "screeners": [
-        "growth_technology_stocks"
+        "day_gainers"
       ],
-      "short_name": "Western Digital Corporation",
+      "short_name": "Bloom Energy Corporation",
       "source": "yfinance_screener",
-      "symbol": "WDC",
+      "symbol": "BE",
       "theme": "dynamic_yfinance"
     },
     {
-      "rank_score": 10.4597,
-      "screeners": [
-        "growth_technology_stocks"
-      ],
-      "short_name": "Seagate Technology Holdings PLC",
-      "source": "yfinance_screener",
-      "symbol": "STX",
-      "theme": "dynamic_yfinance"
-    },
-    {
-      "rank_score": 10.1814,
+      "rank_score": 12.0801,
       "screeners": [
         "most_actives"
       ],
-      "short_name": "CoreWeave, Inc.",
+      "short_name": "Rocket Lab Corporation",
       "source": "yfinance_screener",
-      "symbol": "CRWV",
+      "symbol": "RKLB",
       "theme": "dynamic_yfinance"
     },
     {
-      "rank_score": 10.1641,
+      "rank_score": 11.8655,
+      "screeners": [
+        "day_gainers"
+      ],
+      "short_name": "Lam Research Corporation",
+      "source": "yfinance_screener",
+      "symbol": "LRCX",
+      "theme": "dynamic_yfinance"
+    },
+    {
+      "rank_score": 11.8497,
       "screeners": [
         "day_gainers",
         "growth_technology_stocks"
@@ -237,7 +188,7 @@
       "theme": "dynamic_yfinance"
     },
     {
-      "rank_score": 10.0318,
+      "rank_score": 11.143,
       "screeners": [
         "most_actives"
       ],
@@ -247,7 +198,47 @@
       "theme": "dynamic_yfinance"
     },
     {
-      "rank_score": 9.3513,
+      "rank_score": 10.601,
+      "screeners": [
+        "growth_technology_stocks"
+      ],
+      "short_name": "Western Digital Corporation",
+      "source": "yfinance_screener",
+      "symbol": "WDC",
+      "theme": "dynamic_yfinance"
+    },
+    {
+      "rank_score": 10.5573,
+      "screeners": [
+        "most_actives"
+      ],
+      "short_name": "Cisco Systems, Inc.",
+      "source": "yfinance_screener",
+      "symbol": "CSCO",
+      "theme": "dynamic_yfinance"
+    },
+    {
+      "rank_score": 10.2804,
+      "screeners": [
+        "most_actives"
+      ],
+      "short_name": "CoreWeave, Inc.",
+      "source": "yfinance_screener",
+      "symbol": "CRWV",
+      "theme": "dynamic_yfinance"
+    },
+    {
+      "rank_score": 10.0925,
+      "screeners": [
+        "growth_technology_stocks"
+      ],
+      "short_name": "Seagate Technology Holdings PLC",
+      "source": "yfinance_screener",
+      "symbol": "STX",
+      "theme": "dynamic_yfinance"
+    },
+    {
+      "rank_score": 9.3325,
       "screeners": [
         "most_actives"
       ],
@@ -257,27 +248,18 @@
       "theme": "dynamic_yfinance"
     },
     {
-      "rank_score": 8.662,
+      "rank_score": 9.3259,
       "screeners": [
-        "most_actives"
-      ],
-      "short_name": "IREN LIMITED",
-      "source": "yfinance_screener",
-      "symbol": "IREN",
-      "theme": "dynamic_yfinance"
-    },
-    {
-      "rank_score": 8.3292,
-      "screeners": [
+        "most_actives",
         "day_gainers"
       ],
-      "short_name": "Datadog, Inc.",
+      "short_name": "IonQ, Inc.",
       "source": "yfinance_screener",
-      "symbol": "DDOG",
+      "symbol": "IONQ",
       "theme": "dynamic_yfinance"
     },
     {
-      "rank_score": 8.1582,
+      "rank_score": 8.42,
       "screeners": [
         "most_actives"
       ],
@@ -287,17 +269,28 @@
       "theme": "dynamic_yfinance"
     },
     {
-      "rank_score": 7.9145,
+      "rank_score": 7.9645,
       "screeners": [
+        "day_gainers",
         "growth_technology_stocks"
       ],
-      "short_name": "Analog Devices, Inc.",
+      "short_name": "Teradyne, Inc.",
       "source": "yfinance_screener",
-      "symbol": "ADI",
+      "symbol": "TER",
       "theme": "dynamic_yfinance"
     },
     {
-      "rank_score": 7.4026,
+      "rank_score": 7.8133,
+      "screeners": [
+        "most_actives"
+      ],
+      "short_name": "Akamai Technologies, Inc.",
+      "source": "yfinance_screener",
+      "symbol": "AKAM",
+      "theme": "dynamic_yfinance"
+    },
+    {
+      "rank_score": 7.7596,
       "screeners": [
         "day_gainers",
         "growth_technology_stocks"
@@ -308,38 +301,28 @@
       "theme": "dynamic_yfinance"
     },
     {
-      "rank_score": 6.724,
-      "screeners": [
-        "most_actives"
-      ],
-      "short_name": "IonQ, Inc.",
-      "source": "yfinance_screener",
-      "symbol": "IONQ",
-      "theme": "dynamic_yfinance"
-    },
-    {
-      "rank_score": 6.4452,
-      "screeners": [
-        "day_gainers",
-        "growth_technology_stocks"
-      ],
-      "short_name": "Ciena Corporation",
-      "source": "yfinance_screener",
-      "symbol": "CIEN",
-      "theme": "dynamic_yfinance"
-    },
-    {
-      "rank_score": 6.3618,
+      "rank_score": 6.5591,
       "screeners": [
         "day_gainers"
       ],
-      "short_name": "AXT Inc",
+      "short_name": "Constellation Energy Corporatio",
       "source": "yfinance_screener",
-      "symbol": "AXTI",
+      "symbol": "CEG",
       "theme": "dynamic_yfinance"
     },
     {
-      "rank_score": 6.3042,
+      "rank_score": 6.4046,
+      "screeners": [
+        "most_actives",
+        "day_gainers"
+      ],
+      "short_name": "Carnival Corporation Ltd.",
+      "source": "yfinance_screener",
+      "symbol": "CCL",
+      "theme": "dynamic_yfinance"
+    },
+    {
+      "rank_score": 6.0506,
       "screeners": [
         "most_actives"
       ],
@@ -349,63 +332,74 @@
       "theme": "dynamic_yfinance"
     },
     {
-      "rank_score": 6.0971,
+      "rank_score": 5.8459,
       "screeners": [
-        "growth_technology_stocks"
+        "most_actives",
+        "day_gainers"
       ],
-      "short_name": "Amphenol Corporation",
+      "short_name": "American Airlines Group, Inc.",
       "source": "yfinance_screener",
-      "symbol": "APH",
+      "symbol": "AAL",
       "theme": "dynamic_yfinance"
     },
     {
-      "rank_score": 5.9585,
-      "screeners": [
-        "most_actives"
-      ],
-      "short_name": "NextEra Energy, Inc.",
-      "source": "yfinance_screener",
-      "symbol": "NEE",
-      "theme": "dynamic_yfinance"
-    },
-    {
-      "rank_score": 5.8521,
-      "screeners": [
-        "most_actives"
-      ],
-      "short_name": "Robinhood Markets, Inc.",
-      "source": "yfinance_screener",
-      "symbol": "HOOD",
-      "theme": "dynamic_yfinance"
-    },
-    {
-      "rank_score": 5.5208,
-      "screeners": [
-        "growth_technology_stocks"
-      ],
-      "short_name": "Teradyne, Inc.",
-      "source": "yfinance_screener",
-      "symbol": "TER",
-      "theme": "dynamic_yfinance"
-    },
-    {
-      "rank_score": 4.9758,
-      "screeners": [
-        "most_actives"
-      ],
-      "short_name": "Boston Scientific Corporation",
-      "source": "yfinance_screener",
-      "symbol": "BSX",
-      "theme": "dynamic_yfinance"
-    },
-    {
-      "rank_score": 4.0319,
+      "rank_score": 5.6308,
       "screeners": [
         "day_gainers"
+      ],
+      "short_name": "Vistra Corp.",
+      "source": "yfinance_screener",
+      "symbol": "VST",
+      "theme": "dynamic_yfinance"
+    },
+    {
+      "rank_score": 5.3971,
+      "screeners": [
+        "growth_technology_stocks"
+      ],
+      "short_name": "Ciena Corporation",
+      "source": "yfinance_screener",
+      "symbol": "CIEN",
+      "theme": "dynamic_yfinance"
+    },
+    {
+      "rank_score": 5.2082,
+      "screeners": [
+        "most_actives"
+      ],
+      "short_name": "Nike, Inc.",
+      "source": "yfinance_screener",
+      "symbol": "NKE",
+      "theme": "dynamic_yfinance"
+    },
+    {
+      "rank_score": 4.5888,
+      "screeners": [
+        "most_actives"
       ],
       "short_name": "Target Corporation",
       "source": "yfinance_screener",
       "symbol": "TGT",
+      "theme": "dynamic_yfinance"
+    },
+    {
+      "rank_score": 4.1243,
+      "screeners": [
+        "most_actives"
+      ],
+      "short_name": "AT&T Inc.",
+      "source": "yfinance_screener",
+      "symbol": "T",
+      "theme": "dynamic_yfinance"
+    },
+    {
+      "rank_score": 2.7045,
+      "screeners": [
+        "most_actives"
+      ],
+      "short_name": "Apellis Pharmaceuticals, Inc.",
+      "source": "yfinance_screener",
+      "symbol": "APLS",
       "theme": "dynamic_yfinance"
     }
   ],
@@ -413,7 +407,7 @@
   "generation": {
     "base_count": 25,
     "base_name": "liubang_core_v1",
-    "dynamic_count": 30,
+    "dynamic_count": 29,
     "dynamic_summary": {
       "cache_path": "data/cache/dynamic_universe_yfinance.json",
       "errors": {},
@@ -448,7 +442,7 @@
         "TSM",
         "XLK"
       ],
-      "fetched_at": "2026-05-20T10:09:15.946700+00:00",
+      "fetched_at": "2026-05-21T08:20:34.023507+00:00",
       "filters": {
         "average_volume_proxy": "averageDailyVolume10Day, falling back to 3-month or generic average volume",
         "limit": 30,
@@ -457,46 +451,45 @@
         "min_market_cap": 2000000000.0,
         "min_price": 5.0
       },
-      "raw_quote_count": 196,
+      "raw_quote_count": 215,
       "screeners": [
         "most_actives",
         "day_gainers",
         "growth_technology_stocks"
       ],
-      "selected_count": 30,
+      "selected_count": 29,
       "source": "yfinance.screen",
       "stale_due_to_fetch_error": null,
       "symbols": [
-        "SNDK",
         "INTC",
-        "GOOG",
         "MRVL",
-        "LLY",
-        "RKLB",
-        "CSCO",
-        "NBIS",
+        "IREN",
         "QCOM",
-        "WDC",
-        "STX",
-        "CRWV",
+        "BE",
+        "RKLB",
+        "LRCX",
         "ALAB",
         "WMT",
+        "WDC",
+        "CSCO",
+        "CRWV",
+        "STX",
         "ASTS",
-        "IREN",
-        "DDOG",
-        "BAC",
-        "ADI",
-        "CRDO",
         "IONQ",
-        "CIEN",
-        "AXTI",
-        "NOK",
-        "APH",
-        "NEE",
-        "HOOD",
+        "BAC",
         "TER",
-        "BSX",
-        "TGT"
+        "AKAM",
+        "CRDO",
+        "CEG",
+        "CCL",
+        "NOK",
+        "AAL",
+        "VST",
+        "CIEN",
+        "NKE",
+        "TGT",
+        "T",
+        "APLS"
       ]
     },
     "extra_count": 0
@@ -506,5 +499,5 @@
     "XLK",
     "SMH"
   ],
-  "updated_at": "2026-05-20"
+  "updated_at": "2026-05-21"
 }

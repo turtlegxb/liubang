@@ -19,14 +19,14 @@ PROFILE_ARGS=(
   --dynamic-source none
   --positions-file data/paper_positions.json
   --hard-stop-pct 0.03
-  --symbol-cooldown-days 3
+  --symbol-cooldown-days 0
   --cooldown-journal-file data/paper_trade_journal.csv
 )
 
 RESEARCH_ARGS=(
   --universe config/research_universe_dynamic.json
   --hard-stop-pct 0.03
-  --symbol-cooldown-days 3
+  --symbol-cooldown-days 0
 )
 
 usage() {
@@ -288,7 +288,7 @@ case "$command" in
     "$PYTHON_BIN" scripts/generate_daily_review.py --open "$@"
     ;;
   build-universe)
-    "$PYTHON_BIN" scripts/build_research_universe.py --dynamic-limit 30 "$@"
+    "$PYTHON_BIN" scripts/build_research_universe.py --dynamic-limit 30 --refresh-dynamic "$@"
     ;;
   compare-scoring)
     "$PYTHON_BIN" scripts/compare_scoring_modes.py "${RESEARCH_ARGS[@]}" "$@"

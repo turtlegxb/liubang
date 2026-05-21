@@ -49,6 +49,7 @@ from liubang.risk_throttle import RiskThrottleInputs, risk_throttle_from_journal
 from liubang.schwab_adapter import RetrySettings, SchwabAdapter
 from liubang.signals import (
     attach_options_context,
+    build_signal_selection_payload,
     format_discord_message,
     format_signal_summary,
     build_watchlist_concentration,
@@ -98,6 +99,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--extended-hours", action="store_true", help="Request extended-hours history.")
     parser.add_argument("--cache-dir", default="data/cache")
     parser.add_argument("--output-dir", default="data/exports")
+    parser.add_argument("--skip-selection-export", action="store_true", help="Do not write the compact filtered signal selection JSON.")
+    parser.add_argument("--selection-output", default=None, help="Compact filtered signal selection JSON path. Defaults to data/exports/signal_selection_TIMESTAMP.json.")
+    parser.add_argument("--latest-selection-output", default=None, help="Stable compact selection JSON path. Defaults to data/exports/latest_signal_selection.json.")
     parser.add_argument("--positions-file", default="data/manual_positions.json")
     parser.add_argument("--ignore-positions", action="store_true")
     parser.add_argument("--journal-file", default="data/trade_journal.csv")
@@ -196,8 +200,34 @@ def main() -> int:
             report = apply_risk_throttle(report, args)
         if args.options_source == "schwab" and report.get("watchlist"):
             report = enrich_with_schwab_options(report, args)
-        report_path = Path(args.output_dir) / f"signals_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S_%f')}.json"
+        timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S_%f")
+        output_dir = Path(args.output_dir)
+        report_path = output_dir / f"signals_{timestamp}.json"
+        selection_path = (
+            None
+            if args.skip_selection_export
+            else Path(args.selection_output)
+            if args.selection_output
+            else output_dir / f"signal_selection_{timestamp}.json"
+        )
+        latest_selection_path = (
+            None
+            if args.skip_selection_export
+            else Path(args.latest_selection_output)
+            if args.latest_selection_output
+            else output_dir / "latest_signal_selection.json"
+        )
+        if selection_path is not None:
+            report["signal_selection"] = {
+                "path": str(selection_path),
+                "latest_path": str(latest_selection_path) if latest_selection_path else None,
+            }
         write_signal_report(report_path, report)
+        if selection_path is not None:
+            selection_payload = build_signal_selection_payload(report, signal_report_path=report_path)
+            write_signal_report(selection_path, selection_payload)
+            if latest_selection_path is not None and latest_selection_path != selection_path:
+                write_signal_report(latest_selection_path, selection_payload)
 
         if args.send_discord:
             webhook_url = args.discord_webhook_url or os.getenv("DISCORD_WEBHOOK_URL")

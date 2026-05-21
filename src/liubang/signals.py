@@ -349,6 +349,88 @@ def build_watchlist_concentration(watchlist: list[dict[str, Any]]) -> dict[str, 
     }
 
 
+def build_signal_selection_payload(
+    report: dict[str, Any],
+    *,
+    signal_report_path: Path | None = None,
+) -> dict[str, Any]:
+    watchlist = [
+        compact_signal_selection_item(rank, item)
+        for rank, item in enumerate(report.get("watchlist", []), start=1)
+        if isinstance(item, dict)
+    ]
+    return {
+        "generated_at": datetime.now(UTC).isoformat(),
+        "source_signal_report": str(signal_report_path) if signal_report_path else None,
+        "signal_generated_at": report.get("generated_at"),
+        "mode": report.get("mode"),
+        "scoring_mode": report.get("scoring_mode"),
+        "market_regime": report.get("market_regime") or {},
+        "context_regimes": report.get("context_regimes") or {},
+        "data_quality": report.get("data_quality") or {},
+        "history_sources": report.get("history_sources") or {},
+        "filters": {
+            "regime_policy": report.get("regime_policy") or {},
+            "watchlist_count_before_regime_policy": report.get("watchlist_count_before_regime_policy"),
+            "watchlist_skipped_regime_policy": report.get("watchlist_skipped_regime_policy"),
+            "symbol_cooldown": report.get("symbol_cooldown") or {},
+            "risk_throttle": report.get("risk_throttle") or {},
+            "portfolio_guard": report.get("portfolio_guard") or {},
+        },
+        "watchlist_concentration": report.get("watchlist_concentration") or {},
+        "watchlist_count": len(watchlist),
+        "symbols": [item["symbol"] for item in watchlist if item.get("symbol")],
+        "watchlist": watchlist,
+    }
+
+
+def compact_signal_selection_item(rank: int, item: dict[str, Any]) -> dict[str, Any]:
+    plan = item.get("trade_plan") or {}
+    metadata = item.get("source_metadata") or {}
+    news = item.get("recent_news") or []
+    news_risk = item.get("news_risk") or {}
+    options = item.get("options_context") or {}
+    options_risk = item.get("options_risk") or {}
+    weekly_gex = options.get("weekly_gex") or {}
+    factor_data = item.get("factor_data") or {}
+    return {
+        "rank": rank,
+        "symbol": item.get("symbol"),
+        "source": item.get("source"),
+        "theme": metadata.get("theme"),
+        "source_reason": metadata.get("reason"),
+        "action": item.get("action"),
+        "as_of_date": item.get("as_of_date"),
+        "planned_entry_date": item.get("planned_entry_date"),
+        "market_regime": item.get("market_regime"),
+        "scoring_mode": item.get("scoring_mode"),
+        "total_score": item.get("total_score"),
+        "classic_total_score": item.get("classic_total_score"),
+        "ranked_total_score": item.get("ranked_total_score"),
+        "overlay_score": factor_data.get("overlay_score"),
+        "rs20_rank": factor_data.get("rs20_rank"),
+        "atr20_pct": factor_data.get("atr20_pct"),
+        "pullback_pct": item.get("pullback_pct"),
+        "close": item.get("close"),
+        "entry_price_reference": item.get("entry_price_reference"),
+        "stop_price_reference": item.get("stop_price_reference"),
+        "first_target_price_reference": item.get("first_target_price_reference"),
+        "suggested_shares": plan.get("suggested_shares"),
+        "suggested_position_value": plan.get("suggested_position_value"),
+        "suggested_dollar_risk": plan.get("suggested_dollar_risk"),
+        "binding_constraint": plan.get("binding_constraint"),
+        "news_risk": news_risk.get("level"),
+        "options_risk": options_risk.get("level"),
+        "weekly_gex_regime": weekly_gex.get("regime"),
+        "weekly_net_gex": weekly_gex.get("net_gex"),
+        "weekly_call_wall": weekly_gex.get("call_wall"),
+        "weekly_put_wall": weekly_gex.get("put_wall"),
+        "risk_notes": item.get("risk_notes") or [],
+        "recent_news_count": len(news),
+        "top_news_headline": news[0].get("title") if news else None,
+    }
+
+
 def write_signal_report(path: Path, report: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -426,6 +508,9 @@ def format_signal_summary(report: dict[str, Any], report_path: Path) -> str:
             f"pullback={item['pullback_pct']:.2%} close={item['close']} "
             f"regime={item['market_regime']}{source_note}{shares_note}{news_note}{options_note}{risk_note}"
         )
+    signal_selection = report.get("signal_selection") or {}
+    if signal_selection.get("path"):
+        lines.append(f"Selection: {signal_selection.get('path')}")
     lines.append(f"Report: {report_path}")
     return "\n".join(lines)
 

@@ -44,7 +44,7 @@ config/core_universe.json
 .venv/bin/python scripts/run_backtest.py \
   --universe config/research_universe_dynamic.json \
   --hard-stop-pct 0.03 \
-  --symbol-cooldown-days 3
+  --symbol-cooldown-days 0
 ```
 
 刷新 Schwab 历史缓存：
@@ -76,7 +76,7 @@ config/core_universe.json
 - `min_pullback_pct=0.01`
 - `max_pullback_pct=0.06`
 - `hard_stop_pct=0.03`
-- `symbol_cooldown_days=3`
+- `symbol_cooldown_days=0`
 
 调整最低分数：
 
@@ -110,7 +110,7 @@ config/core_universe.json
 .venv/bin/python scripts/run_backtest.py \
   --universe config/research_universe_dynamic.json \
   --hard-stop-pct 0.03 \
-  --symbol-cooldown-days 3 \
+  --symbol-cooldown-days 0 \
   --scoring-mode ranked_v2
 ```
 
@@ -126,7 +126,7 @@ sh scripts/liubang_live.sh compare-scoring
 .venv/bin/python scripts/compare_scoring_modes.py \
   --universe config/research_universe_dynamic.json \
   --hard-stop-pct 0.03 \
-  --symbol-cooldown-days 3
+  --symbol-cooldown-days 0
 ```
 
 对比报告写入 `data/exports/scoring_compare_*.json`。如需回退旧口径，传入 `--scoring-mode classic`。
@@ -168,7 +168,7 @@ sh scripts/liubang_live.sh cross-scoring
 .venv/bin/python scripts/run_research_suite.py \
   --universe config/research_universe_dynamic.json \
   --hard-stop-pct 0.03 \
-  --symbol-cooldown-days 3
+  --symbol-cooldown-days 0
 ```
 
 日线长历史代理：

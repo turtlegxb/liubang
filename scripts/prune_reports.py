@@ -7,6 +7,7 @@ from pathlib import Path
 
 REPORT_PREFIXES = (
     "signals_",
+    "signal_selection_",
     "watchlist_",
     "triggers_",
     "manual_position_templates_",
