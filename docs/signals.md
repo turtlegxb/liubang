@@ -82,6 +82,27 @@ HTML 面板默认输出到 `data/dashboard/liubang_dashboard.html`，页面每 3
   --symbol-cooldown-days 3
 ```
 
+默认评分模式是 `ranked_v2`。下面命令即使不写 `--scoring-mode ranked_v2` 也会使用 v2；显式写出方便确认当前口径：
+
+```bash
+.venv/bin/python scripts/generate_signals.py \
+  --universe config/research_universe_dynamic.json \
+  --dynamic-source none \
+  --hard-stop-pct 0.03 \
+  --symbol-cooldown-days 3 \
+  --scoring-mode ranked_v2
+```
+
+`ranked_v2` 只在 `classic` 主分数上做小幅排序 overlay；它偏向 20/60 日相对 QQQ 更强且仍站在 SMA20 上方的候选。
+
+当前默认还会根据大盘 regime 自动收紧：
+
+- `strong`：启用严格过滤，要求 `rs20_rank >= 0.65`、`overlay >= 7.4`、`atr20_pct <= 0.08`、`pullback <= 5%`
+- `neutral`：沿用普通 `ranked_v2`
+- `weak`：不生成新开仓候选
+
+需要回退旧评分口径时传入 `--scoring-mode classic`。
+
 手动指定股票会覆盖 universe，并禁用动态补充：
 
 ```bash

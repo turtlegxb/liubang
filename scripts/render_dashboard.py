@@ -170,6 +170,8 @@ def load_paper_positions(path: Path) -> dict[str, Any]:
         }
     positions = [dict(item) for item in payload.get("positions", []) if isinstance(item, dict)]
     open_positions = [item for item in positions if as_int(item.get("remaining_shares", item.get("shares"))) > 0]
+    for item in open_positions:
+        item["entry_time_et"] = item.get("entry_time_et") or item.get("entry_bar_time_et")
     open_symbols = {str(item.get("symbol") or "").upper() for item in open_positions if item.get("symbol")}
     total_value = sum(as_float(item.get("entry_price")) * as_int(item.get("remaining_shares", item.get("shares"))) for item in open_positions)
     total_risk = sum(position_initial_risk(item) for item in open_positions)
@@ -1102,7 +1104,7 @@ def render_paper_positions_panel(paper: dict[str, Any], monitor: dict[str, Any])
         body = f"""
           <div class="table-wrap">
             <table>
-              <thead><tr><th>标的</th><th>状态</th><th>入场日</th><th>剩余</th><th>入场</th><th>止损</th><th>目标</th><th>最新价</th><th>浮动 R</th><th>距止损</th><th>距目标</th><th>动作</th></tr></thead>
+              <thead><tr><th>标的</th><th>状态</th><th>入场日</th><th>入场时间</th><th>剩余</th><th>入场</th><th>止损</th><th>止损模式</th><th>Trail Ref</th><th>目标</th><th>最新价</th><th>浮动 R</th><th>距止损</th><th>距目标</th><th>动作</th></tr></thead>
               <tbody>{rows}</tbody>
             </table>
           </div>
@@ -1176,14 +1178,19 @@ def render_paper_position_row(position: dict[str, Any], evaluation: dict[str, An
     remaining = as_int(position.get("remaining_shares", position.get("shares")))
     shares = as_int(position.get("shares"))
     live = position_live_metrics(position, latest_close)
+    stop_mode = position_stop_mode(position, evaluation)
+    trailing_stop = evaluation.get("trailing_stop_reference") if evaluation else None
     return f"""
       <tr>
         <td class="mono">{h(symbol)}</td>
         <td>{status_pill(status)}</td>
         <td>{h(position.get('entry_date'))}</td>
+        <td>{entry_time_cell(position.get('entry_time_et'))}</td>
         <td>{remaining} / {shares}</td>
         <td>{h(position.get('entry_price'))}</td>
         <td>{h(position.get('current_stop_price') or position.get('initial_stop_price'))}</td>
+        <td>{stop_mode}</td>
+        <td>{h(format_price(trailing_stop))}</td>
         <td>{h(position.get('target_price'))}</td>
         <td>{h(latest_close)}</td>
         <td>{h(live.get('floating_r'))}</td>
@@ -1379,6 +1386,13 @@ def change_pill(value: Any) -> str:
     return f'<span class="pill {tone}">{h(format_signed_pct(number))}</span>'
 
 
+def entry_time_cell(value: Any) -> str:
+    parsed = parse_dt(value)
+    if parsed is None:
+        return '<span class="pill warn">missing</span>'
+    return h(parsed.astimezone(EASTERN).strftime("%H:%M"))
+
+
 def gex_pill(value: Any) -> str:
     regime = str(value or "").lower()
     labels = {"positive": "正", "negative": "负", "neutral": "中性"}
@@ -1466,6 +1480,21 @@ def position_live_metrics(position: dict[str, Any], latest_close: Any) -> dict[s
         "distance_to_stop_pct": format_signed_pct(distance_to_stop),
         "distance_to_target_pct": format_signed_pct(distance_to_target),
     }
+
+
+def position_stop_mode(position: dict[str, Any], evaluation: dict[str, Any] | None) -> str:
+    if not position.get("target_hit"):
+        return '<span class="pill muted">initial</span>'
+    entry = as_float(position.get("entry_price"))
+    current_stop = as_float(position.get("current_stop_price", position.get("initial_stop_price")))
+    trailing_stop = optional_float((evaluation or {}).get("trailing_stop_reference"))
+    stop_reference = optional_float((evaluation or {}).get("stop_reference"))
+    effective_stop = stop_reference if stop_reference is not None else current_stop
+    if trailing_stop is not None and trailing_stop >= effective_stop and trailing_stop > entry:
+        return '<span class="pill good">trailing</span>'
+    if effective_stop > entry:
+        return '<span class="pill good">locked</span>'
+    return '<span class="pill info">breakeven</span>'
 
 
 def format_signed_pct(value: float | None) -> str:

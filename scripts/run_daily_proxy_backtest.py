@@ -21,15 +21,21 @@ from liubang.backtest import (
     BacktestParams,
     DailyBar,
     NON_TRADABLE_CONTEXT_SYMBOLS,
+    SCORING_MODE_CLASSIC,
+    SCORING_MODES,
+    apply_candidate_scoring_mode,
     count_weekdays,
+    filter_candidates_for_regime_policy,
     generate_candidates,
     generate_market_regimes,
     max_drawdown_pct,
     max_position_count,
     previous_available_date,
+    regime_policy_summary,
     summarize_by_exit_month,
     summarize_by_key,
     update_symbol_cooldown,
+    validate_scoring_mode,
 )
 from liubang.cli_utils import load_earnings_for_symbols, load_env
 from liubang.defaults import (
@@ -62,6 +68,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-score", type=float, default=DEFAULT_MIN_SCORE)
     parser.add_argument("--min-pullback-pct", type=float, default=DEFAULT_MIN_PULLBACK_PCT)
     parser.add_argument("--max-pullback-pct", type=float, default=DEFAULT_MAX_PULLBACK_PCT)
+    parser.add_argument("--scoring-mode", choices=SCORING_MODES, default=BacktestParams().scoring_mode)
     parser.add_argument("--hard-stop-pct", type=float, default=DEFAULT_HARD_STOP_PCT)
     parser.add_argument("--risk-per-trade-pct", type=float, default=DEFAULT_RISK_PER_TRADE_PCT)
     parser.add_argument("--max-position-pct", type=float, default=DEFAULT_MAX_POSITION_PCT)
@@ -96,6 +103,7 @@ def main() -> int:
             min_score=args.min_score,
             min_pullback_pct=args.min_pullback_pct,
             max_pullback_pct=args.max_pullback_pct,
+            scoring_mode=args.scoring_mode,
             hard_stop_pct=args.hard_stop_pct,
             risk_per_trade_pct=args.risk_per_trade_pct,
             max_position_pct=args.max_position_pct,
@@ -232,6 +240,7 @@ def run_daily_proxy_backtest(
 ) -> dict[str, Any]:
     if "SPY" not in daily_by_symbol or "QQQ" not in daily_by_symbol:
         raise ValueError("Daily proxy requires SPY and QQQ histories for market regime labels.")
+    validate_scoring_mode(params.scoring_mode)
     regimes = generate_market_regimes(daily_by_symbol["SPY"], daily_by_symbol["QQQ"])
     bars_by_symbol_date = {
         symbol: {bar.session_date: bar for bar in bars}
@@ -265,6 +274,22 @@ def run_daily_proxy_backtest(
         for candidate in candidates:
             candidates_by_entry_date.setdefault(candidate.entry_date, []).append(candidate)
 
+    if params.scoring_mode != SCORING_MODE_CLASSIC:
+        candidates_by_entry_date = {
+            entry_date: apply_candidate_scoring_mode(candidates, params.scoring_mode)
+            for entry_date, candidates in candidates_by_entry_date.items()
+        }
+    pre_policy_candidate_count = sum(len(candidates) for candidates in candidates_by_entry_date.values())
+    candidates_by_entry_date = {
+        entry_date: filter_candidates_for_regime_policy(candidates, params)
+        for entry_date, candidates in candidates_by_entry_date.items()
+    }
+    all_candidates = [
+        candidate
+        for candidates in candidates_by_entry_date.values()
+        for candidate in candidates
+    ]
+
     all_dates = sorted(set().union(*(set(item) for item in bars_by_symbol_date.values())))
     equity = params.initial_equity
     open_trades: list[dict[str, Any]] = []
@@ -279,6 +304,8 @@ def run_daily_proxy_backtest(
         "skipped_duplicate_symbol": 0,
         "skipped_symbol_cooldown": 0,
         "skipped_missing_daily_bar": 0,
+        "candidate_count_before_regime_policy": pre_policy_candidate_count,
+        "skipped_regime_policy": pre_policy_candidate_count - len(all_candidates),
     }
     blocked_symbols_until: dict[str, date] = {}
     for session_date in all_dates:
@@ -378,6 +405,7 @@ def run_daily_proxy_backtest(
             "symbols": list(symbols),
             "period": period,
             "params": asdict(params),
+            "regime_policy": regime_policy_summary(params),
             "earnings_filter": earnings_calendar.summary() if earnings_calendar else None,
         },
         "data": summarize_daily_data(daily_by_symbol),
@@ -576,6 +604,7 @@ def format_daily_proxy_summary(report: dict[str, Any], path: Path) -> str:
         "Daily proxy backtest summary",
         "Mode: daily proxy, not 5-minute trigger verified",
         f"Symbols: {', '.join(report['config']['symbols'])}",
+        f"Scoring mode: {report['config']['params'].get('scoring_mode')}",
         f"Candidates: {report['candidate_count']}",
         f"Trades: {summary['trade_count']}",
         f"Entry attempts: {diagnostics.get('entry_attempts')} filled={diagnostics.get('filled_entries')} unfilled={diagnostics.get('unfilled_entries')}",
@@ -587,6 +616,12 @@ def format_daily_proxy_summary(report: dict[str, Any], path: Path) -> str:
         f"Max drawdown: {summary['max_drawdown_pct']}%",
         f"Report: {path}",
     ]
+    regime_policy = report.get("config", {}).get("regime_policy") or {}
+    if regime_policy.get("enabled"):
+        lines.insert(4, f"Regime policy: {regime_policy.get('mode')}")
+    skipped_regime_policy = diagnostics.get("skipped_regime_policy")
+    if skipped_regime_policy:
+        lines.insert(6, f"Regime policy skipped: {skipped_regime_policy}")
     return "\n".join(lines)
 
 

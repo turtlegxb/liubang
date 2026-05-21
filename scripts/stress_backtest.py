@@ -16,7 +16,7 @@ SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from liubang.backtest import BacktestParams, run_backtest
+from liubang.backtest import BacktestParams, SCORING_MODES, run_backtest
 from liubang.cli_utils import load_earnings_for_symbols, load_env, load_histories, summarize_history_sources
 from liubang.earnings import DEFAULT_EARNINGS_CACHE_PATH, EarningsCalendar
 from liubang.universe import DEFAULT_UNIVERSE_PATH, resolve_symbols
@@ -39,6 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-score", type=float, default=BacktestParams().min_score)
     parser.add_argument("--min-pullback-pct", type=float, default=BacktestParams().min_pullback_pct)
     parser.add_argument("--max-pullback-pct", type=float, default=BacktestParams().max_pullback_pct)
+    parser.add_argument("--scoring-mode", choices=SCORING_MODES, default=BacktestParams().scoring_mode)
     parser.add_argument("--hard-stop-pct", type=float, default=BacktestParams().hard_stop_pct)
     parser.add_argument("--symbol-cooldown-days", type=int, default=0)
     return parser
@@ -77,6 +78,7 @@ def main() -> int:
                 min_score=args.min_score,
                 min_pullback_pct=args.min_pullback_pct,
                 max_pullback_pct=args.max_pullback_pct,
+                scoring_mode=args.scoring_mode,
                 hard_stop_pct=args.hard_stop_pct,
                 symbol_cooldown_days=max(0, args.symbol_cooldown_days),
             ),
@@ -168,6 +170,7 @@ def row_from_report(
         "max_pullback_pct": params.max_pullback_pct,
         "hard_stop_pct": params.hard_stop_pct,
         "symbol_cooldown_days": params.symbol_cooldown_days,
+        "scoring_mode": params.scoring_mode,
         "candidate_count": report["candidate_count"],
         "entry_attempts": diagnostics.get("entry_attempts"),
         "filled_entries": diagnostics.get("filled_entries"),
@@ -198,6 +201,7 @@ def write_stress_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         "max_pullback_pct",
         "hard_stop_pct",
         "symbol_cooldown_days",
+        "scoring_mode",
         "candidate_count",
         "entry_attempts",
         "filled_entries",

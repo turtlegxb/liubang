@@ -111,6 +111,8 @@ def build_paper_action_update(
         action = str(evaluation.get("action") or "")
         if action == "sell_half_at_first_target":
             result = apply_partial_target(position, evaluation, fees=fees, source_path=source_path)
+        elif action == "raise_trailing_stop":
+            result = apply_raise_trailing_stop(position, evaluation)
         elif action in {"exit_remaining_stop", "exit_remaining_breakeven_or_stop", "exit_remaining_time_stop"}:
             result = apply_exit_remaining(position, evaluation, fees=fees, source_path=source_path)
         else:
@@ -119,7 +121,8 @@ def build_paper_action_update(
         if result is None:
             skipped.append({"symbol": symbol, "reason": "stale_or_invalid_action"})
             continue
-        journal_rows.append(result["journal_row"])
+        if result.get("journal_row"):
+            journal_rows.append(result["journal_row"])
         applied_actions.append(result["applied_action"])
 
     positions_after = [
@@ -127,7 +130,7 @@ def build_paper_action_update(
         for item in positions
         if int(item.get("remaining_shares", item.get("shares", 0)) or 0) > 0
     ]
-    changed = bool(journal_rows) or len(positions_after) != len(positions)
+    changed = bool(applied_actions) or bool(journal_rows) or len(positions_after) != len(positions)
     return {
         "generated_at": datetime.now(UTC).isoformat(),
         "mode": "paper_action_update",
@@ -137,6 +140,25 @@ def build_paper_action_update(
         "journal_rows": journal_rows,
         "skipped": skipped,
         "positions_after": positions_after,
+    }
+
+
+def apply_raise_trailing_stop(position: dict[str, Any], evaluation: dict[str, Any]) -> dict[str, Any] | None:
+    hint = evaluation.get("update_hint") or {}
+    new_stop = as_float(hint.get("set_current_stop_price") or evaluation.get("stop_reference"))
+    current_stop = as_float(position.get("current_stop_price"))
+    if new_stop <= 0 or new_stop <= current_stop:
+        return None
+    position["current_stop_price"] = round(new_stop, 4)
+    return {
+        "journal_row": None,
+        "applied_action": {
+            "symbol": position.get("symbol"),
+            "action": "raise_trailing_stop",
+            "previous_stop_price": round(current_stop, 4),
+            "current_stop_price": round(new_stop, 4),
+            "remaining_shares": int(position.get("remaining_shares", 0)),
+        },
     }
 
 

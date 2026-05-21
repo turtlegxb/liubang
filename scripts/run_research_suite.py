@@ -11,6 +11,11 @@ from typing import Any
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SRC_ROOT = PROJECT_ROOT / "src"
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
+
+from liubang.backtest import BacktestParams, SCORING_MODES
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -22,6 +27,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-score", type=float, default=7.0)
     parser.add_argument("--min-pullback-pct", type=float, default=0.01)
     parser.add_argument("--max-pullback-pct", type=float, default=0.06)
+    parser.add_argument("--scoring-mode", choices=SCORING_MODES, default=BacktestParams().scoring_mode)
     parser.add_argument("--hard-stop-pct", type=float, default=0.04)
     parser.add_argument("--symbol-cooldown-days", type=int, default=0)
     parser.add_argument("--refresh", action="store_true", help="Refresh intraday history for 5-minute research steps.")
@@ -166,6 +172,7 @@ def append_strategy_args(command: list[str], args: argparse.Namespace) -> None:
         "min_score",
         "min_pullback_pct",
         "max_pullback_pct",
+        "scoring_mode",
         "hard_stop_pct",
         "symbol_cooldown_days",
     ):

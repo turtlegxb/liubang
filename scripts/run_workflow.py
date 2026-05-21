@@ -17,6 +17,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from liubang.cli_utils import load_env
+from liubang.backtest import SCORING_MODES
 
 
 EASTERN = ZoneInfo("America/New_York")
@@ -59,6 +60,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-score", type=float, default=None)
     parser.add_argument("--min-pullback-pct", type=float, default=None)
     parser.add_argument("--max-pullback-pct", type=float, default=None)
+    parser.add_argument("--scoring-mode", choices=SCORING_MODES, default=None)
     parser.add_argument("--symbol-cooldown-days", type=int, default=None)
     parser.add_argument("--cooldown-journal-file", default=None)
     parser.add_argument("--risk-per-trade-pct", type=float, default=None)
@@ -312,6 +314,7 @@ def append_signal_strategy_args(command: list[str], args: argparse.Namespace) ->
         "min_score",
         "min_pullback_pct",
         "max_pullback_pct",
+        "scoring_mode",
         "symbol_cooldown_days",
     ):
         value = getattr(args, key)

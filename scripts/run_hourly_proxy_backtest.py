@@ -14,7 +14,7 @@ SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from liubang.backtest import BacktestParams, format_backtest_summary, run_backtest
+from liubang.backtest import BacktestParams, SCORING_MODES, format_backtest_summary, run_backtest
 from liubang.cli_utils import load_earnings_for_symbols, load_env, summarize_history_sources
 from liubang.defaults import (
     DEFAULT_HARD_STOP_PCT,
@@ -47,6 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-score", type=float, default=DEFAULT_MIN_SCORE)
     parser.add_argument("--min-pullback-pct", type=float, default=DEFAULT_MIN_PULLBACK_PCT)
     parser.add_argument("--max-pullback-pct", type=float, default=DEFAULT_MAX_PULLBACK_PCT)
+    parser.add_argument("--scoring-mode", choices=SCORING_MODES, default=BacktestParams().scoring_mode)
     parser.add_argument("--hard-stop-pct", type=float, default=DEFAULT_HARD_STOP_PCT)
     parser.add_argument("--risk-per-trade-pct", type=float, default=DEFAULT_RISK_PER_TRADE_PCT)
     parser.add_argument("--max-position-pct", type=float, default=DEFAULT_MAX_POSITION_PCT)
@@ -82,6 +83,7 @@ def main() -> int:
             min_score=args.min_score,
             min_pullback_pct=args.min_pullback_pct,
             max_pullback_pct=args.max_pullback_pct,
+            scoring_mode=args.scoring_mode,
             hard_stop_pct=args.hard_stop_pct,
             risk_per_trade_pct=args.risk_per_trade_pct,
             max_position_pct=args.max_position_pct,
@@ -150,6 +152,12 @@ def format_hourly_proxy_summary(report: dict, path: Path) -> str:
         f"History sources: {format_history_sources(report.get('history_sources') or {})}",
         f"Report: {path}",
     ]
+    regime_policy = report.get("config", {}).get("regime_policy") or {}
+    if regime_policy.get("enabled"):
+        lines.insert(3, f"Regime policy: {regime_policy.get('mode')}")
+    skipped_regime_policy = diagnostics.get("skipped_regime_policy")
+    if skipped_regime_policy:
+        lines.insert(5, f"Regime policy skipped: {skipped_regime_policy}")
     return "\n".join(lines)
 
 

@@ -300,6 +300,18 @@ cp config/trade_journal.example.csv data/trade_journal.csv
 .venv/bin/python scripts/run_backtest.py
 ```
 
+对比原始评分和横截面排序评分：
+
+```bash
+sh scripts/liubang_live.sh compare-scoring
+```
+
+默认评分已经是 `ranked_v2`，并会根据大盘 regime 自动选择过滤强度：`strong` 使用严格 v2 过滤，`neutral` 使用普通 v2，`weak` 不开新仓。显式回测 v2：
+
+```bash
+.venv/bin/python scripts/run_backtest.py --scoring-mode ranked_v2
+```
+
 运行 yfinance 日线长历史代理回测：
 
 ```bash

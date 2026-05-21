@@ -15,7 +15,7 @@ if str(PROJECT_ROOT) not in sys.path:
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from liubang.backtest import BacktestParams, run_backtest
+from liubang.backtest import BacktestParams, SCORING_MODES, run_backtest
 from liubang.cli_utils import load_earnings_for_symbols, load_env, load_histories, parse_float_grid
 from liubang.defaults import DEFAULT_INITIAL_EQUITY
 from liubang.earnings import DEFAULT_EARNINGS_CACHE_PATH
@@ -42,6 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-scores", default="7,8,9")
     parser.add_argument("--max-pullback-pcts", default="0.04,0.05,0.06")
     parser.add_argument("--hard-stop-pcts", default="0.03,0.04,0.05")
+    parser.add_argument("--scoring-modes", default=BacktestParams().scoring_mode)
     parser.add_argument("--symbol-cooldown-days", default="0")
     parser.add_argument("--min-trades", type=int, default=20)
     return parser
@@ -76,49 +77,52 @@ def main() -> int:
         for min_score in parse_float_grid(args.min_scores):
             for max_pullback_pct in parse_float_grid(args.max_pullback_pcts):
                 for hard_stop_pct in parse_float_grid(args.hard_stop_pcts):
-                    for cooldown_days in parse_int_list(args.symbol_cooldown_days):
-                        params = BacktestParams(
-                            initial_equity=args.initial_equity,
-                            min_score=min_score,
-                            max_pullback_pct=max_pullback_pct,
-                            hard_stop_pct=hard_stop_pct,
-                            symbol_cooldown_days=cooldown_days,
-                        )
-                        report = run_backtest(
-                            history_by_symbol,
-                            symbols=symbols,
-                            params=params,
-                            earnings_calendar=earnings_calendar,
-                        )
-                        summary = report["summary"]
-                        diagnostics = report.get("diagnostics", {})
-                        concentration = symbol_concentration(summary)
-                        rows.append(
-                            {
-                                "min_score": min_score,
-                                "max_pullback_pct": max_pullback_pct,
-                                "hard_stop_pct": hard_stop_pct,
-                                "symbol_cooldown_days": cooldown_days,
-                                "candidate_count": report["candidate_count"],
-                                "trade_count": summary["trade_count"],
-                                "win_rate": summary["win_rate"],
-                                "total_pnl": summary["total_pnl"],
-                                "return_pct": summary["return_pct"],
-                                "max_drawdown_pct": summary["max_drawdown_pct"],
-                                "average_pnl": summary["average_pnl"],
-                                "average_r": summary.get("average_r"),
-                                "profit_factor": summary.get("profit_factor"),
-                                "top1_symbol": concentration.get("top1_symbol"),
-                                "top1_net_share": concentration.get("top1_net_share"),
-                                "top3_symbols": ",".join(concentration.get("top3_symbols") or []),
-                                "top3_net_share": concentration.get("top3_net_share"),
-                                "entry_attempts": diagnostics.get("entry_attempts"),
-                                "filled_entries": diagnostics.get("filled_entries"),
-                                "unfilled_entries": diagnostics.get("unfilled_entries"),
-                                "skipped_no_slot": diagnostics.get("skipped_no_slot"),
-                                "skipped_symbol_cooldown": diagnostics.get("skipped_symbol_cooldown"),
-                            }
-                        )
+                    for scoring_mode in parse_scoring_modes(args.scoring_modes):
+                        for cooldown_days in parse_int_list(args.symbol_cooldown_days):
+                            params = BacktestParams(
+                                initial_equity=args.initial_equity,
+                                min_score=min_score,
+                                max_pullback_pct=max_pullback_pct,
+                                hard_stop_pct=hard_stop_pct,
+                                scoring_mode=scoring_mode,
+                                symbol_cooldown_days=cooldown_days,
+                            )
+                            report = run_backtest(
+                                history_by_symbol,
+                                symbols=symbols,
+                                params=params,
+                                earnings_calendar=earnings_calendar,
+                            )
+                            summary = report["summary"]
+                            diagnostics = report.get("diagnostics", {})
+                            concentration = symbol_concentration(summary)
+                            rows.append(
+                                {
+                                    "min_score": min_score,
+                                    "max_pullback_pct": max_pullback_pct,
+                                    "hard_stop_pct": hard_stop_pct,
+                                    "scoring_mode": scoring_mode,
+                                    "symbol_cooldown_days": cooldown_days,
+                                    "candidate_count": report["candidate_count"],
+                                    "trade_count": summary["trade_count"],
+                                    "win_rate": summary["win_rate"],
+                                    "total_pnl": summary["total_pnl"],
+                                    "return_pct": summary["return_pct"],
+                                    "max_drawdown_pct": summary["max_drawdown_pct"],
+                                    "average_pnl": summary["average_pnl"],
+                                    "average_r": summary.get("average_r"),
+                                    "profit_factor": summary.get("profit_factor"),
+                                    "top1_symbol": concentration.get("top1_symbol"),
+                                    "top1_net_share": concentration.get("top1_net_share"),
+                                    "top3_symbols": ",".join(concentration.get("top3_symbols") or []),
+                                    "top3_net_share": concentration.get("top3_net_share"),
+                                    "entry_attempts": diagnostics.get("entry_attempts"),
+                                    "filled_entries": diagnostics.get("filled_entries"),
+                                    "unfilled_entries": diagnostics.get("unfilled_entries"),
+                                    "skipped_no_slot": diagnostics.get("skipped_no_slot"),
+                                    "skipped_symbol_cooldown": diagnostics.get("skipped_symbol_cooldown"),
+                                }
+                            )
         output_path = Path(args.output_dir) / f"sweep_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S_%f')}.csv"
         write_rows(output_path, rows)
     except Exception as exc:
@@ -142,7 +146,8 @@ def main() -> int:
         print(
             "  "
             f"score>={row['min_score']} max_pb={row['max_pullback_pct']:.3f} "
-            f"stop={row['hard_stop_pct']:.3f} cooldown={row['symbol_cooldown_days']} "
+            f"stop={row['hard_stop_pct']:.3f} scoring={row['scoring_mode']} "
+            f"cooldown={row['symbol_cooldown_days']} "
             f"trades={row['trade_count']} "
             f"win={row['win_rate']:.2%} ret={row['return_pct']}% "
             f"dd={row['max_drawdown_pct']}% avgR={row['average_r']} "
@@ -152,12 +157,27 @@ def main() -> int:
     return 0
 
 
+def parse_scoring_modes(raw: str) -> tuple[str, ...]:
+    values = []
+    for item in raw.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        if item not in SCORING_MODES:
+            raise ValueError(f"Unsupported scoring mode {item!r}; expected one of {SCORING_MODES}")
+        values.append(item)
+    if not values:
+        raise ValueError("--scoring-modes must include at least one mode")
+    return tuple(dict.fromkeys(values))
+
+
 def write_rows(path: Path, rows: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fieldnames = [
         "min_score",
         "max_pullback_pct",
         "hard_stop_pct",
+        "scoring_mode",
         "symbol_cooldown_days",
         "candidate_count",
         "trade_count",

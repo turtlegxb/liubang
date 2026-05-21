@@ -90,6 +90,64 @@ config/core_universe.json
 .venv/bin/python scripts/sweep_backtest.py
 ```
 
+## 选股评分模式
+
+目前支持三种评分模式：
+
+- `classic`：原始二元打分；可用 `--scoring-mode classic` 回退旧口径。
+- `ranked_v1`：先沿用 `classic` 的硬过滤和主分数，再用同一天候选的横截面排名做小幅排序 overlay。它会重点看 20/60 日相对 QQQ 强度、距离 20 日高点、相对 SMA20 位置、ATR 标准化回撤、缩量程度和收盘位置。
+- `ranked_v2`：当前默认。候选准入仍沿用 `classic`，主分数仍以 `classic` 为底，只用 20 日相对 QQQ 强度、60 日相对 QQQ 强度和相对 SMA20 距离做小幅重排。
+
+默认回测已使用 `ranked_v2`，并默认启用 regime-aware v2 过滤：
+
+- `strong`：自动加严格过滤，要求 `ranked_v2_rs_20d_rank >= 0.65`、`ranked_v2_overlay_score >= 7.4`、`atr20_pct <= 0.08`、`pullback <= 5%`
+- `neutral`：沿用普通 `ranked_v2`
+- `weak`：阻止新开仓候选
+
+显式运行：
+
+```bash
+.venv/bin/python scripts/run_backtest.py \
+  --universe config/research_universe_dynamic.json \
+  --hard-stop-pct 0.03 \
+  --symbol-cooldown-days 3 \
+  --scoring-mode ranked_v2
+```
+
+对比旧评分和新评分：
+
+```bash
+sh scripts/liubang_live.sh compare-scoring
+```
+
+或直接运行：
+
+```bash
+.venv/bin/python scripts/compare_scoring_modes.py \
+  --universe config/research_universe_dynamic.json \
+  --hard-stop-pct 0.03 \
+  --symbol-cooldown-days 3
+```
+
+对比报告写入 `data/exports/scoring_compare_*.json`。如需回退旧口径，传入 `--scoring-mode classic`。
+
+寻找 5 分钟和 1 小时代理同时有效的过滤组合：
+
+```bash
+sh scripts/liubang_live.sh cross-scoring
+```
+
+或直接运行：
+
+```bash
+.venv/bin/python scripts/cross_validate_scoring_strategies.py \
+  --universe config/research_universe_dynamic.json \
+  --max-configs 1152 \
+  --progress-every 200
+```
+
+该脚本会按 `min(5m_pf, hourly_pf)` 排序，报告写入 `data/exports/scoring_cross_validation_*.json` 和 `.csv`。
+
 运行单票冷却 sweep：
 
 ```bash
@@ -239,6 +297,6 @@ config/core_universe.json
 - Schwab 5 分钟历史窗口有限。
 - yfinance 5 分钟历史可补缺，但通常比 Schwab 短。
 - 财报过滤依赖 yfinance，实盘前应检查数据质量。
-- 新闻和期权只做上下文，不参与回测分数。
+- 新闻和期权只做上下文，不参与回测分数；GEX 暂不进入历史回测，除非有历史 GEX 数据源。
 - 默认回测使用固定或指定股票池；当天动态 screener 不应直接混入历史回测，除非先生成明确的研究 universe 文件。
 - 组合权益曲线是简化的 closed-trade 曲线。

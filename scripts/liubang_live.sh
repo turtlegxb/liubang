@@ -55,6 +55,8 @@ Commands:
   review             生成盘后复盘 JSON 和 HTML
   review-open        生成并打开盘后复盘 HTML
   build-universe     重新生成扩展研究股票池
+  compare-scoring    对比 classic、ranked_v1、ranked_v2 选股评分回测
+  cross-scoring      搜索 5m 和 1h 同时过线的评分过滤组合
   research           重跑当前通过验证的完整研究套件
   validate           验证最新研究报告
 
@@ -69,6 +71,8 @@ Examples:
   scripts/liubang_live.sh gex AMD --refresh
   scripts/liubang_live.sh dashboard-open
   scripts/liubang_live.sh review-open
+  scripts/liubang_live.sh compare-scoring
+  scripts/liubang_live.sh cross-scoring
   scripts/liubang_live.sh positions
 
 Append extra args after any command, for example:
@@ -285,6 +289,14 @@ case "$command" in
     ;;
   build-universe)
     "$PYTHON_BIN" scripts/build_research_universe.py --dynamic-limit 30 "$@"
+    ;;
+  compare-scoring)
+    "$PYTHON_BIN" scripts/compare_scoring_modes.py "${RESEARCH_ARGS[@]}" "$@"
+    ;;
+  cross-scoring)
+    "$PYTHON_BIN" scripts/cross_validate_scoring_strategies.py \
+      --universe config/research_universe_dynamic.json \
+      "$@"
     ;;
   research)
     "$PYTHON_BIN" scripts/run_research_suite.py "${RESEARCH_ARGS[@]}" "$@"

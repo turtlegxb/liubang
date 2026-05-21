@@ -7,12 +7,16 @@ from typing import Any
 
 from liubang.backtest import (
     BacktestParams,
+    apply_watchlist_scoring_mode,
     aggregate_daily,
+    build_scoring_factor_data,
     consecutive_down_days,
+    filter_watchlist_for_regime_policy,
     generate_market_regimes,
     latest_context_regimes,
     NON_TRADABLE_CONTEXT_SYMBOLS,
     parse_schwab_candles,
+    regime_policy_summary,
     return_by_date,
     rolling_mean,
     summarize_data,
@@ -82,6 +86,9 @@ def generate_signal_report(
         if signal is not None:
             watchlist.append(signal)
 
+    watchlist = apply_watchlist_scoring_mode(watchlist, params.scoring_mode)
+    pre_policy_watchlist_count = len(watchlist)
+    watchlist = filter_watchlist_for_regime_policy(watchlist, params)
     watchlist = sorted(watchlist, key=lambda item: item["total_score"], reverse=True)
 
     data_summary = summarize_data(daily_by_symbol)
@@ -103,11 +110,15 @@ def generate_signal_report(
             "date": latest_regime_date.isoformat() if latest_regime_date else None,
             "regime": latest_regime,
         },
+        "scoring_mode": params.scoring_mode,
+        "regime_policy": regime_policy_summary(params),
         "earnings_filter": earnings_calendar.summary() if earnings_calendar else None,
         "news": news_book.summary() if news_book else None,
         "context_regimes": latest_context_regimes(daily_by_symbol, ("XLK", "SMH")),
         "data": data_summary,
         "data_quality": evaluate_data_quality(data_summary, expected_symbols=symbols),
+        "watchlist_count_before_regime_policy": pre_policy_watchlist_count,
+        "watchlist_skipped_regime_policy": pre_policy_watchlist_count - len(watchlist),
         "watchlist_count": len(watchlist),
         "watchlist_concentration": build_watchlist_concentration(watchlist),
         "watchlist": watchlist,
@@ -146,6 +157,8 @@ def score_latest_symbol(
     sma20 = rolling_mean(closes, 20)
     volume5 = rolling_mean(volumes, 5)
     qqq_return_by_date = return_by_date(qqq_daily, 10)
+    qqq_return20_by_date = return_by_date(qqq_daily, 20)
+    qqq_return60_by_date = return_by_date(qqq_daily, 60)
 
     if sma5[idx] is None or sma10[idx] is None or sma20[idx] is None:
         return None
@@ -230,6 +243,17 @@ def score_latest_symbol(
     if total_score < params.min_score:
         return None
 
+    factor_data = build_scoring_factor_data(
+        daily=daily,
+        idx=idx,
+        qqq_return20_by_date=qqq_return20_by_date,
+        qqq_return60_by_date=qqq_return60_by_date,
+        recent_high=recent_high,
+        volume5_value=volume5[idx],
+        sma20_value=sma20[idx],
+        classic_score=total_score,
+    )
+
     sizing = sizing or SizingInputs(
         account_equity=params.initial_equity,
         risk_per_trade_pct=params.risk_per_trade_pct,
@@ -252,9 +276,12 @@ def score_latest_symbol(
         "planned_entry_date": planned_entry_date.isoformat(),
         "market_regime": regime,
         "total_score": round(total_score, 3),
+        "classic_total_score": round(total_score, 3),
+        "scoring_mode": params.scoring_mode,
         "strength_score": round(strength_score, 3),
         "pullback_score": round(pullback_score, 3),
         "pullback_pct": round(pullback_pct, 5),
+        "factor_data": factor_data,
         "close": round(bar.close, 4),
         "recent_5d_high": round(recent_high, 4),
         "technical_stop_reference": round(bar.low, 4),
@@ -333,8 +360,13 @@ def format_signal_summary(report: dict[str, Any], report_path: Path) -> str:
         "Signal summary",
         f"Generated: {report['generated_at']}",
         f"Market regime: {regime['regime']} ({regime['date']})",
+        f"Scoring mode: {report.get('scoring_mode')}",
         f"Watchlist count: {report['watchlist_count']}",
     ]
+    regime_policy = report.get("regime_policy") or {}
+    if regime_policy.get("enabled"):
+        skipped = report.get("watchlist_skipped_regime_policy")
+        lines.append(f"Regime policy: {regime_policy.get('mode')} skipped={skipped}")
     context_regimes = report.get("context_regimes") or {}
     if context_regimes:
         context = ", ".join(
@@ -404,6 +436,11 @@ def format_discord_message(report: dict[str, Any]) -> str:
         f"Liubang watchlist | regime={regime['regime']} | date={regime['date']}",
         f"Candidates: {report['watchlist_count']}",
     ]
+    regime_policy = report.get("regime_policy") or {}
+    if regime_policy.get("enabled") and report.get("watchlist_skipped_regime_policy"):
+        lines.append(
+            f"Regime policy: {regime_policy.get('mode')} skipped={report.get('watchlist_skipped_regime_policy')}"
+        )
     context_regimes = report.get("context_regimes") or {}
     if context_regimes:
         context = ", ".join(

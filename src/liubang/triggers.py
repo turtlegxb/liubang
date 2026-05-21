@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +36,7 @@ class TriggerEvaluation:
     trade_plan: dict[str, Any] | None = None
     manual_position_template: dict[str, Any] | None = None
     conditions: dict[str, bool] | None = None
+    data_quality_warnings: list[str] | None = None
     reason: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -78,6 +79,7 @@ def scan_intraday_triggers(
             current_session_date=current_session_date,
             sizing=sizing,
         ).to_dict()
+        evaluation.update(trigger_ranking_context(signal, evaluation))
         duplicate_symbol = symbol in open_symbols
         evaluation["entry_allowed_by_portfolio_guard"] = entry_allowed
         evaluation["entry_allowed_by_symbol_guard"] = not duplicate_symbol
@@ -124,6 +126,34 @@ def scan_intraday_triggers(
         "actionable_triggered_count": len(actionable),
         "blocked_triggered_count": len(triggered) - len(actionable),
         "evaluations": evaluations,
+    }
+
+
+def trigger_ranking_context(signal: dict[str, Any], evaluation: dict[str, Any]) -> dict[str, Any]:
+    latest_close = as_float(evaluation.get("last_close"))
+    trigger_reference = as_float(evaluation.get("trigger_price_reference"))
+    signal_score = as_float(signal.get("total_score")) or as_float(evaluation.get("signal_score")) or 0.0
+    confirmation_margin_pct = None
+    if latest_close is not None and trigger_reference is not None and trigger_reference > 0:
+        confirmation_margin_pct = (latest_close - trigger_reference) / trigger_reference
+
+    news_risk = signal.get("news_risk") or {}
+    options_context = signal.get("options_context") or {}
+    weekly_gex = options_context.get("weekly_gex") or {}
+    reference_price = latest_close or as_float(signal.get("close"))
+    ranking_score = signal_score * 10.0
+    if confirmation_margin_pct is not None:
+        ranking_score += confirmation_margin_pct * 100.0
+
+    return {
+        "trigger_rank_score": round(ranking_score, 4),
+        "confirmation_margin_pct": round(confirmation_margin_pct, 6) if confirmation_margin_pct is not None else None,
+        "news_risk_level": news_risk.get("level"),
+        "weekly_gex_regime": weekly_gex.get("regime"),
+        "weekly_net_gex": weekly_gex.get("net_gex"),
+        "weekly_call_wall": weekly_gex.get("call_wall"),
+        "weekly_put_wall": weekly_gex.get("put_wall"),
+        "weekly_gex_risk_tags": weekly_gex_risk_tags(weekly_gex, reference_price=reference_price),
     }
 
 
@@ -200,8 +230,24 @@ def evaluate_intraday_trigger(
             reason="first_regular_5m_candle_is_skipped",
         )
 
+    data_quality_warnings = intraday_data_quality_warnings(session_candles)
     latest = session_candles[-1]
     prior = session_candles[-2]
+    if data_quality_warnings:
+        return TriggerEvaluation(
+            symbol=symbol,
+            status="data_suspect",
+            triggered=False,
+            planned_entry_date=planned_entry_date.isoformat(),
+            signal_score=signal_score,
+            source=source,
+            last_bar_time_et=latest.dt_et.isoformat(),
+            last_close=round(latest.close, 4),
+            prior_candle_high=round(prior.high, 4),
+            data_quality_warnings=data_quality_warnings,
+            reason=data_quality_warnings[0],
+        )
+
     vwap = running_vwap(session_candles)
     technical_stop = as_float(signal.get("technical_stop_reference"))
     invalidated = technical_stop is not None and latest.close <= technical_stop
@@ -265,6 +311,53 @@ def running_vwap(candles: list[Candle]) -> float:
         typical_price = (candle.high + candle.low + candle.close) / 3.0
         weighted += typical_price * max(0.0, candle.volume)
     return weighted / total_volume
+
+
+def intraday_data_quality_warnings(candles: list[Candle]) -> list[str]:
+    warnings = []
+    for candle in candles[-6:]:
+        if candle.high < candle.low or candle.open <= 0 or candle.high <= 0 or candle.low <= 0 or candle.close <= 0:
+            warnings.append("invalid_ohlc_range")
+            break
+        if not (candle.low <= candle.close <= candle.high):
+            warnings.append("close_outside_ohlc_range")
+            break
+
+    if len(candles) >= 2:
+        prior = candles[-2]
+        latest = candles[-1]
+        if latest.dt_et - prior.dt_et > timedelta(minutes=7):
+            warnings.append("missing_recent_5m_candle_gap")
+        if latest.volume <= 0 or prior.volume <= 0:
+            warnings.append("zero_volume_latest_two_bars")
+        if prior.close > 0 and abs(latest.close / prior.close - 1.0) >= 0.12:
+            warnings.append("large_5m_close_jump")
+    return warnings
+
+
+def weekly_gex_risk_tags(weekly_gex: dict[str, Any], *, reference_price: float | None) -> list[str]:
+    tags = []
+    regime = str(weekly_gex.get("regime") or "").lower()
+    if regime in {"positive", "negative", "neutral"}:
+        tags.append(f"gex_{regime}")
+    if not reference_price or reference_price <= 0:
+        return tags
+
+    call_wall = as_float(weekly_gex.get("call_wall"))
+    put_wall = as_float(weekly_gex.get("put_wall"))
+    if call_wall:
+        distance = (call_wall - reference_price) / reference_price
+        if abs(distance) <= 0.0075:
+            tags.append("near_call_wall")
+        elif 0 < distance <= 0.02:
+            tags.append("call_wall_overhead")
+    if put_wall:
+        distance = (reference_price - put_wall) / reference_price
+        if abs(distance) <= 0.0075:
+            tags.append("near_put_wall")
+        elif 0 < distance <= 0.02:
+            tags.append("put_wall_support_nearby")
+    return tags
 
 
 def sizing_from_signal_report(report: dict[str, Any]) -> SizingInputs:

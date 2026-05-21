@@ -14,7 +14,7 @@ SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from liubang.backtest import BacktestParams
+from liubang.backtest import BacktestParams, SCORING_MODES
 from liubang.cli_utils import (
     load_earnings_for_symbols,
     load_env,
@@ -109,6 +109,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-score", type=float, default=DEFAULT_MIN_SCORE)
     parser.add_argument("--min-pullback-pct", type=float, default=DEFAULT_MIN_PULLBACK_PCT)
     parser.add_argument("--max-pullback-pct", type=float, default=DEFAULT_MAX_PULLBACK_PCT)
+    parser.add_argument("--scoring-mode", choices=SCORING_MODES, default=BacktestParams().scoring_mode)
     parser.add_argument("--symbol-cooldown-days", type=int, default=0)
     parser.add_argument("--cooldown-journal-file", default=None)
     parser.add_argument("--account-equity", type=float, default=DEFAULT_INITIAL_EQUITY)
@@ -162,6 +163,7 @@ def main() -> int:
                 min_score=args.min_score,
                 min_pullback_pct=args.min_pullback_pct,
                 max_pullback_pct=args.max_pullback_pct,
+                scoring_mode=args.scoring_mode,
                 symbol_cooldown_days=max(0, args.symbol_cooldown_days),
             ),
             earnings_calendar=earnings_calendar,

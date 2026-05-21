@@ -848,3 +848,359 @@ scripts/liubang_live.sh gex AMD --refresh
 - paper 持仓已满时，新触发写入 `skipped_portfolio_full`，不再追加到 `data/paper_positions.json`
 
 当前状态示例：neutral regime 最大 2 个持仓，paper 已有 AAPL、ARM、CRWD 共 3 个开放持仓，因此 dashboard 显示 `仓位槽位 0 / 2`，`允许新开 no`。
+
+## 2026-05-21 复盘和 Paper 执行口径修正
+
+根据 2026-05-20 盘后复盘，保留 `news_risk=high` 为提示信息，不作为硬拦截。
+
+修正：
+
+- 复盘 `new_paper_positions` 改为用当日 paper journal 已平交易 + 当前开放 paper 持仓去重统计
+- 同时保留 `raw_new_paper_position_events`，用于识别历史 update 事件污染
+- 开放 paper 持仓补充 `entry_time_et` 展示；缺失时复盘和 dashboard 标记
+- paper trigger 记录器按 `trigger_rank_score`、信号分数、触发确认强度排序，只记录剩余槽位内的最高优先级候选
+- `target_1` 后剩余仓不再用盘中 low 触发 breakeven/stop，改为 5m 收盘跌破 post-target stop 才退出
+
+当前 2026-05-20 复盘口径：原始新增事件 13，按 journal+open 去重后 9。
+
+## 2026-05-21 复盘增强和长期样本
+
+继续保留滑点为暂不建模项，其他复盘改进已落地。
+
+新增行为：
+
+- 仓位监控报告增加 `initial_risk_per_share`、`unrealized_pnl`、`floating_r`、`distance_to_stop_pct`、`distance_to_target_pct`
+- 复盘 “最终触发状态” 同时展示首次触发时间/价格和最终状态，避免把“盘中曾触发”和“收盘后最终状态”混在一起
+- 复盘 Watchlist 展示周 GEX 状态、净 GEX、Call Wall、Put Wall
+- `workflow` 因 `outside ET market window` 被跳过时降级为 info，不再计入数据问题数量
+- `portfolio_guard` 超过最大开放持仓或最大总敞口时，复盘标记 `paper_exposure_breach`
+- `scripts/generate_daily_review.py` 默认维护 `data/reviews/review_samples.csv`，按 `review_date_et + symbol` 覆盖更新，用于长期统计候选、触发、GEX 和 paper 结果
+
+样本字段包括：
+
+- 日期、标的、计划入场日、分数、回撤
+- 是否盘中触发、首次触发时间/价格、最终状态
+- news/options 风险、周 GEX、Call Wall、Put Wall
+- paper 状态、paper PnL、paper R multiple
+
+## 2026-05-21 观察可信度增强
+
+本轮暂不做“下一根 5m K 入场”和滑点建模，其他观察可信度改进已落地。
+
+新增口径：
+
+- `scripts/generate_daily_review.py` 默认忽略早于 `2026-05-20T13:50:00+00:00` 的 `paper_positions_update` 报告，用于隔离初期开盘 bug 污染；被忽略报告以 `paper_update_boundary_filter` 记录为 info，不计入数据问题
+- `record_paper_triggers.py` 为每个触发候选记录 `paper_candidate_rank`、`paper_slot_selected`、`paper_fill_status`、`paper_skip_reason`
+- 未进入 paper 的触发候选统一写入 `missed_triggers`，状态为 `triggered_but_not_filled`
+- `review_samples.csv` 新增槽位归因字段：`paper_candidate_rank`、`paper_slot_selected`、`paper_skip_reason`、`paper_fill_status`
+- `review_samples.csv` 新增触发时段字段：`trigger_time_bucket`，分为 `open_30m`、`morning`、`midday`、`afternoon`、`late_day`
+- `review_samples.csv` 新增 GEX 标签字段：`gex_risk_tags`
+- `review_samples.csv` 新增 `exit_reason`，从 paper journal 的 notes 中识别 `target_1`、`stop`、`time_stop`、`manual_exit`
+- trigger 扫描新增 5m 数据异常保护：最新两根 5m 成交量为 0、最新两根间隔异常、OHLC 不合理、5m 收盘跳变过大时，标记为 `data_suspect`，不触发 paper
+
+注意：这些改动只增强观察记录和样本可信度，不会改变入场确认条件，也不会模拟滑点。
+
+## 2026-05-21 1R 后 Trailing Stop
+
+新增 1R 卖出一半后的剩余仓 trailing stop。
+
+规则：
+
+- 只在 `target_hit=true` 后启用
+- trailing stop 使用“最高 5m 收盘价 - 1R”
+- 最终 stop 取 `max(current_stop_price, entry_price, trailing_stop)`
+- 剩余仓退出仍然要求最新 5m 收盘价跌破 stop；盘中影线不触发
+- 如果 trailing stop 能上移，仓位监控输出 `raise_trailing_stop`
+- paper action 对 `raise_trailing_stop` 只更新 `data/paper_positions.json` 的 `current_stop_price`，不写平仓 journal
+
+该规则保留原来的“1R 卖半 + 保本”底线，同时让强势延续的半仓可以逐步锁定利润。
+
+## 2026-05-21 复盘样本和 Dashboard 继续收紧
+
+新增三项观察优化：
+
+- `missed_triggers` 去重：按 `symbol + entry_date + paper_skip_reason` 保留首次事件，避免 5 分钟 loop 重复记录同一个错过原因
+- dashboard 的 “Paper 持仓” 表新增 `止损模式` 和 `Trail Ref`
+  - `initial`：尚未触及 1R
+  - `breakeven`：1R 后保本
+  - `locked`：止损已经高于入场价
+  - `trailing`：当前有效止损来自 trailing stop
+- `review_samples.csv` 新增 `mfe_r_5m_close` 和 `mae_r_5m_close`
+
+MFE/MAE 当前口径：
+
+- 基于当日每轮 trigger report 的 `last_close`
+- 只统计首次触发之后的 5m 收盘路径
+- 单位为 R
+- 这是 5m 收盘代理值，不是逐笔最高/最低，也不是 5m high/low
+
+## 2026-05-21 选股评分模式和对比回测
+
+新增 `scoring_mode`，默认仍为 `classic`，确保当前观察 workflow 不被静默改变。
+
+新增模式：
+
+- `classic`：原始强度分 + 回撤分，候选准入和排序都沿用旧逻辑
+- `ranked_v1`：候选准入仍沿用 `classic`，主分数也以 `classic` 为底，再用同一天候选的横截面因子做小幅排序 overlay
+
+`ranked_v1` 因子：
+
+- 20 日相对 QQQ 强度
+- 60 日相对 QQQ 强度
+- 距离 SMA20 的强度位置
+- 距离 20 日高点的位置
+- ATR 标准化回撤质量
+- 5 日成交量比率，缩量更优
+- 当日收盘位置
+
+新增回测入口：
+
+```bash
+sh scripts/liubang_live.sh compare-scoring
+```
+
+等价直接命令：
+
+```bash
+.venv/bin/python scripts/compare_scoring_modes.py \
+  --universe config/research_universe_dynamic.json \
+  --hard-stop-pct 0.03 \
+  --symbol-cooldown-days 3
+```
+
+报告输出：`data/exports/scoring_compare_*.json`。
+
+注意：
+
+- `ranked_v1` 当前是排序 overlay，不改变原始 `min_score`、回撤范围、财报过滤等硬约束
+- GEX、新闻、期权链仍是上下文提示，不进入历史评分；没有历史 GEX 数据前，不把它纳入回测分数
+- 后续 `ranked_v2` 已通过跨周期检查，见下一节；`ranked_v1` 保留为对照模式
+
+## 2026-05-21 ranked_v2 打分回测优化
+
+继续用当前扩展研究股票池和已验证观察参数做打分优化：
+
+```bash
+universe=config/research_universe_dynamic.json
+hard_stop_pct=0.03
+symbol_cooldown_days=3
+```
+
+先在 5 分钟样本中 sweep 多种 overlay 方向，再用小时代理和日线代理做防过拟合检查。
+
+候选结果：
+
+```text
+classic:
+  5m     trades=121 return=10.026% pf=1.4325 dd=6.292% avgR=0.2031
+  hourly trades=312 return=27.728% pf=1.3802 dd=6.388% avgR=0.1981
+  daily  trades=955 return=125.531% pf=1.6931 dd=5.612% avgR=0.1213
+
+ranked_v2 / rs_only overlay:
+  5m     trades=135 return=15.489% pf=1.6099 dd=5.023% avgR=0.2829
+  hourly trades=326 return=37.415% pf=1.4538 dd=5.458% avgR=0.2400
+  daily  trades=983 return=143.580% pf=1.6403 dd=5.920% avgR=0.0980
+```
+
+正式报告：
+
+```text
+scoring_compare=data/exports/scoring_compare_20260520_230856_110336.json
+stress=data/exports/stress_20260520_230916_699882.json
+hourly_proxy=data/exports/hourly_proxy_20260520_230908_854433.json
+daily_proxy=data/exports/daily_proxy_20260520_230909_028801.json
+```
+
+决定：
+
+- 新增 `ranked_v2`
+- 默认切换为 `ranked_v2`
+- 旧口径可用 `--scoring-mode classic` 回退
+
+`ranked_v2` 公式：
+
+- 候选准入仍沿用 `classic`
+- 主分数仍以 `classic_score` 为底
+- overlay 只使用：
+  - 20 日相对 QQQ 强度，权重 3
+  - 60 日相对 QQQ 强度，权重 2
+  - 相对 SMA20 距离，权重 1
+- 最终分数：
+
+```text
+score = classic_score + (overlay_score - 5.0) * 0.20
+```
+
+解释：
+
+`ranked_v1` 加入了过多回撤质量、近高点、缩量和收盘位置因素，在 5 分钟样本之外不够稳。`ranked_v2` 更接近“强者恒强”的横截面重排，只在候选槽位竞争时微调排名，因此更适合作为下一阶段观察模式。
+
+## 2026-05-21 默认评分切换为 ranked_v2
+
+根据前一节回测结果，系统级默认评分从 `classic` 切换为 `ranked_v2`。
+
+影响范围：
+
+- `generate_signals.py` 默认生成 `ranked_v2` watchlist
+- `run_backtest.py`、`stress_backtest.py`、小时代理、日线代理默认使用 `ranked_v2`
+- `run_research_suite.py` 默认使用 `ranked_v2`
+- `scripts/liubang_live.sh signals/workflow/day/loop/research` 都会继承该默认值
+
+回退旧口径：
+
+```bash
+--scoring-mode classic
+```
+
+## 2026-05-21 默认 v2 验证和搜索入口收紧
+
+已确认系统默认值：
+
+```text
+DEFAULT_SCORING_MODE=ranked_v2
+BacktestParams().scoring_mode=ranked_v2
+```
+
+正式回测确认 CLI 也继承默认 v2：
+
+```text
+Scoring mode: ranked_v2
+Trades: 135
+Return: 15.489%
+Profit factor: 1.6099
+Max drawdown: 5.023%
+```
+
+验证命令：
+
+```bash
+.venv/bin/python scripts/smoke_tests.py
+.venv/bin/python scripts/run_backtest.py \
+  --universe config/research_universe_dynamic.json \
+  --hard-stop-pct 0.03 \
+  --symbol-cooldown-days 3
+```
+
+新增 `scripts/search_scoring_strategies.py` 的可控搜索能力：
+
+- `--history-mode 5m`：默认使用 Schwab 5 分钟历史
+- `--history-mode hourly`：使用 yfinance 1 小时代理历史
+- `--progress-every`：长时间搜索时输出进度，避免无反馈长跑
+
+当前发现：在 5 分钟样本中可以通过更严格过滤找到 PF 大于 2 的候选配置，但同一配置在 1 小时代理样本中明显下降。因此目前只把 `ranked_v2` 作为默认观察评分，不把 5 分钟 PF 大于 2 的搜索结果直接升级为默认策略。
+
+## 2026-05-21 PF 大于 2 的交叉验证候选
+
+新增联合验证脚本：
+
+```bash
+sh scripts/liubang_live.sh cross-scoring
+```
+
+等价直接命令：
+
+```bash
+.venv/bin/python scripts/cross_validate_scoring_strategies.py \
+  --universe config/research_universe_dynamic.json \
+  --max-configs 1152 \
+  --progress-every 200
+```
+
+它会同时加载：
+
+- Schwab 5 分钟样本
+- yfinance 1 小时代理样本
+
+然后对同一组过滤条件分别回测，并按 `min(5m_pf, hourly_pf)` 排序。
+
+本轮结果：
+
+```text
+Rows: 1152
+Target: min(5m_pf, hourly_pf)>=2.0
+Target hits: 72
+Best min_pf: 2.1183
+Report: data/exports/scoring_cross_validation_20260520_234525_273983.json
+```
+
+最佳交集候选：
+
+```text
+min_classic_score >= 7.0
+min_ranked_score >= 7.0
+max_pullback_pct <= 0.05
+hard_stop_pct = 0.045
+min_rs20_rank >= 0.65
+min_overlay_score >= 7.4
+max_atr20_pct <= 0.08
+regime_filter = strong
+symbol_cooldown_days = 0
+```
+
+交叉验证表现：
+
+```text
+5m:     trades=79  return=24.739%  pf=2.1766  dd=5.331%
+hourly: trades=194 return=65.006%  pf=2.1183  dd=4.333%
+```
+
+解释：
+
+- 这不是改 `ranked_v2` 公式，而是在 v2 之后增加更严格的准入过滤。
+- 核心含义是：只在大盘强势日交易；候选必须在当天横截面里相对 QQQ 的 20 日强度排名靠前；overlay 分数必须足够高；同时排除 ATR20 超过 8% 的高波动标的。
+- 5 分钟和 1 小时代理同时过 PF 2，说明它不像上一轮纯 5 分钟 PF 2.86 那样明显依赖短样本。
+
+日线代理 caveat：
+
+同一过滤条件在 5 年日线代理中：
+
+```text
+trades=615 return=65.566% pf=1.3554 dd=11.487%
+```
+
+日线代理使用“次日开盘进场、同日 stop/target 同时触及时假设 stop 先触发”的保守粗粒度规则，和真实 5 分钟 VWAP/前高确认触发差别很大。因此它作为压力提示保留，不作为当前 5 天以内策略的硬否决。
+
+## 2026-05-21 默认启用 regime-aware v2
+
+根据“不要分档位，按 regime 自动选择”的决策，默认 `ranked_v2` 增加 regime-aware 准入过滤：
+
+```text
+strong:
+  min_ranked_score >= 7.0
+  max_pullback_pct <= 0.05
+  ranked_v2_rs_20d_rank >= 0.65
+  ranked_v2_overlay_score >= 7.4
+  atr20_pct <= 0.08
+
+neutral:
+  普通 ranked_v2
+
+weak:
+  阻止新开仓候选
+```
+
+说明：
+
+- 这不是新增手动 profile，默认策略会自动按 regime 切换。
+- 暂不按 regime 改 `hard_stop_pct`；止损仍由全局参数控制，避免 paper、trigger、回测口径不一致。
+- 交叉验证中 PF 大于 2 的纯 strong 配置仍保留为研究参考；默认自动策略会在 neutral 日继续保留普通 v2 候选，所以表现不会等同于纯 strong-only 交叉验证结果。
+
+验证结果：
+
+```text
+默认 BacktestParams 口径:
+  5m     trades=94  return=24.640%  pf=1.9750  dd=5.938%
+  hourly trades=259 return=28.367%  pf=1.3581  dd=6.523%
+
+当前 live/research shell 口径 hard_stop=0.03 cooldown=3:
+  5m     trades=100 return=16.648%  pf=1.7507  dd=5.403%
+  hourly trades=262 return=30.187%  pf=1.4684  dd=7.152%
+  daily  trades=784 return=54.893%  pf=1.2973  dd=10.800%
+```
+
+新增报告中会显示：
+
+```text
+Regime policy: regime_aware_v2
+Regime policy skipped: <count>
+```

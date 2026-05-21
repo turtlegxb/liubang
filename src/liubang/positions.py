@@ -40,6 +40,13 @@ class PositionEvaluation:
     latest_close: float | None = None
     stop_reference: float | None = None
     target_price: float | None = None
+    initial_risk_per_share: float | None = None
+    unrealized_pnl: float | None = None
+    floating_r: float | None = None
+    distance_to_stop_pct: float | None = None
+    distance_to_target_pct: float | None = None
+    trailing_peak_close: float | None = None
+    trailing_stop_reference: float | None = None
     holding_sessions: int | None = None
     reason: str | None = None
     update_hint: dict[str, Any] | None = None
@@ -125,12 +132,32 @@ def evaluate_position(
     sessions = sorted({candle.session_date for candle in candles})
     latest = candles[-1]
     holding_sessions = len(sessions)
-    stop_price = max(position.current_stop_price, position.entry_price if position.target_hit else position.current_stop_price)
+    trailing_context = post_target_trailing_context(position, candles) if position.target_hit else {}
+    stop_price = (
+        max(
+            position.current_stop_price,
+            position.entry_price,
+            as_float(trailing_context.get("trailing_stop_reference")),
+        )
+        if position.target_hit
+        else position.current_stop_price
+    )
     current_session_candles = [candle for candle in candles if candle.session_date == latest.session_date]
     session_low = min(candle.low for candle in current_session_candles)
     session_high = max(candle.high for candle in current_session_candles)
 
-    if session_low <= stop_price:
+    if position.target_hit:
+        stop_triggered = latest.close <= stop_price
+        stop_reason = (
+            "latest_close_below_post_target_trailing_stop_reference"
+            if stop_price > position.entry_price
+            else "latest_close_below_post_target_stop_reference"
+        )
+    else:
+        stop_triggered = session_low <= stop_price
+        stop_reason = "latest_session_low_touched_stop_reference"
+
+    if stop_triggered:
         action = "exit_remaining_stop" if not position.target_hit else "exit_remaining_breakeven_or_stop"
         return base_position_evaluation(
             position,
@@ -139,8 +166,9 @@ def evaluate_position(
             needs_attention=True,
             latest=latest,
             stop_reference=stop_price,
+            trailing_context=trailing_context,
             holding_sessions=holding_sessions,
-            reason="latest_session_low_touched_stop_reference",
+            reason=stop_reason,
         )
 
     if not position.target_hit and session_high >= position.target_price:
@@ -162,6 +190,25 @@ def evaluate_position(
             },
         )
 
+    if position.target_hit and stop_price > position.current_stop_price:
+        return base_position_evaluation(
+            position,
+            status="adjust_stop",
+            action="raise_trailing_stop",
+            needs_attention=True,
+            latest=latest,
+            stop_reference=stop_price,
+            trailing_context=trailing_context,
+            holding_sessions=holding_sessions,
+            reason="post_target_trailing_stop_can_move_up",
+            update_hint={
+                "set_current_stop_price": round(stop_price, 4),
+                "previous_stop_price": round(position.current_stop_price, 4),
+                "trailing_r": 1.0,
+                "trailing_peak_close": trailing_context.get("trailing_peak_close"),
+            },
+        )
+
     if holding_sessions >= max_hold_days:
         return base_position_evaluation(
             position,
@@ -170,6 +217,7 @@ def evaluate_position(
             needs_attention=True,
             latest=latest,
             stop_reference=stop_price,
+            trailing_context=trailing_context,
             holding_sessions=holding_sessions,
             reason=f"max_hold_days_reached_{max_hold_days}",
         )
@@ -181,9 +229,22 @@ def evaluate_position(
         needs_attention=False,
         latest=latest,
         stop_reference=stop_price,
+        trailing_context=trailing_context,
         holding_sessions=holding_sessions,
         reason="no_exit_or_partial_condition_met",
     )
+
+
+def post_target_trailing_context(position: ManualPosition, candles: list[Candle]) -> dict[str, float]:
+    risk_per_share = max(0.0, position.entry_price - position.initial_stop_price)
+    if risk_per_share <= 0 or not candles:
+        return {}
+    peak_close = max(candle.close for candle in candles)
+    trailing_stop = peak_close - risk_per_share
+    return {
+        "trailing_peak_close": round(peak_close, 4),
+        "trailing_stop_reference": round(trailing_stop, 4),
+    }
 
 
 def candles_after_entry(position: ManualPosition, candles: list[Candle]) -> list[Candle]:
@@ -221,10 +282,25 @@ def base_position_evaluation(
     needs_attention: bool,
     latest: Candle | None = None,
     stop_reference: float | None = None,
+    trailing_context: dict[str, Any] | None = None,
     holding_sessions: int | None = None,
     reason: str | None = None,
     update_hint: dict[str, Any] | None = None,
 ) -> PositionEvaluation:
+    trailing_context = trailing_context or {}
+    initial_risk_per_share = max(0.0, position.entry_price - position.initial_stop_price)
+    unrealized_pnl = None
+    floating_r = None
+    distance_to_stop_pct = None
+    distance_to_target_pct = None
+    if latest is not None:
+        unrealized_pnl = (latest.close - position.entry_price) * position.remaining_shares
+        if initial_risk_per_share > 0:
+            floating_r = (latest.close - position.entry_price) / initial_risk_per_share
+        if latest.close > 0 and stop_reference is not None:
+            distance_to_stop_pct = (latest.close - stop_reference) / latest.close
+        if latest.close > 0:
+            distance_to_target_pct = (position.target_price - latest.close) / latest.close
     return PositionEvaluation(
         symbol=position.symbol,
         status=status,
@@ -237,6 +313,17 @@ def base_position_evaluation(
         latest_close=round(latest.close, 4) if latest else None,
         stop_reference=round(stop_reference, 4) if stop_reference is not None else None,
         target_price=round(position.target_price, 4),
+        initial_risk_per_share=round(initial_risk_per_share, 4) if initial_risk_per_share > 0 else None,
+        unrealized_pnl=round(unrealized_pnl, 2) if unrealized_pnl is not None else None,
+        floating_r=round(floating_r, 3) if floating_r is not None else None,
+        distance_to_stop_pct=round(distance_to_stop_pct, 4) if distance_to_stop_pct is not None else None,
+        distance_to_target_pct=round(distance_to_target_pct, 4) if distance_to_target_pct is not None else None,
+        trailing_peak_close=round(as_float(trailing_context.get("trailing_peak_close")), 4)
+        if trailing_context.get("trailing_peak_close") is not None
+        else None,
+        trailing_stop_reference=round(as_float(trailing_context.get("trailing_stop_reference")), 4)
+        if trailing_context.get("trailing_stop_reference") is not None
+        else None,
         holding_sessions=holding_sessions,
         reason=reason,
         update_hint=update_hint,
@@ -263,6 +350,8 @@ def format_position_summary(report: dict[str, Any], report_path: Path, positions
         lines.append(
             f"  {idx}. {item['symbol']} status={item['status']} action={item['action']} "
             f"close={item.get('latest_close')} stop={item.get('stop_reference')} "
+            f"R={item.get('floating_r')} stop_dist={item.get('distance_to_stop_pct')} "
+            f"target_dist={item.get('distance_to_target_pct')} "
             f"held={item.get('holding_sessions')}"
         )
     lines.append(f"Report: {report_path}")
@@ -276,6 +365,15 @@ def format_history_sources(summary: dict[str, Any]) -> str:
     return f"{counts or 'none'} fallbacks={fallback_count}"
 
 
+def as_float(value: Any) -> float:
+    try:
+        if value is None or value == "":
+            return 0.0
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def format_position_discord_message(report: dict[str, Any]) -> str:
     attention = [item for item in report.get("evaluations", []) if item.get("needs_attention")]
     lines = [
@@ -284,7 +382,8 @@ def format_position_discord_message(report: dict[str, Any]) -> str:
     for idx, item in enumerate(attention[:8], start=1):
         lines.append(
             f"{idx}. {item['symbol']} {item['action']} close={item.get('latest_close')} "
-            f"stop={item.get('stop_reference')} reason={item.get('reason')}"
+            f"stop={item.get('stop_reference')} R={item.get('floating_r')} "
+            f"stop_dist={item.get('distance_to_stop_pct')} reason={item.get('reason')}"
         )
     if not attention:
         lines.append("No position actions currently required.")

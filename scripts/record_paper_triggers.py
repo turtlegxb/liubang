@@ -51,6 +51,7 @@ def main() -> int:
     print(f"New positions: {len(update['new_positions'])}")
     print(f"Skipped duplicates: {len(update['skipped_duplicates'])}")
     print(f"Skipped portfolio full: {len(update['skipped_portfolio_full'])}")
+    print(f"Missed triggers: {len(update['missed_triggers'])}")
     print(f"Report: {report_path}")
     return 0
 
@@ -105,44 +106,64 @@ def build_paper_update(
     skipped_duplicates = []
     skipped_portfolio_full = []
     skipped_invalid = []
-    for item in trigger_report.get("evaluations", []):
+    missed_triggers = []
+    candidate_results = []
+    candidates = sorted(
+        (
+            item
+            for item in trigger_report.get("evaluations", [])
+            if isinstance(item, dict) and paper_recordable_action(item, include_actionable=include_actionable)
+        ),
+        key=paper_trigger_sort_key,
+    )
+    for rank, item in enumerate(candidates, start=1):
         action = item.get("action")
-        if action == "observe_only_no_manual_entry":
-            pass
-        elif include_actionable and action == "prepare_manual_entry":
-            pass
-        else:
-            continue
+        context = paper_candidate_context(item, rank=rank)
         position = build_paper_position(item, source_path=source_path)
         if position is None:
-            skipped_invalid.append({"symbol": item.get("symbol"), "reason": "missing_position_fields"})
+            skipped = context | {"reason": "missing_position_fields"}
+            skipped_invalid.append(skipped)
+            missed_triggers.append(missed_trigger_record(skipped))
+            candidate_results.append(candidate_result_record(context, selected=False, reason="missing_position_fields"))
             continue
         symbol = position["symbol"]
         if symbol in open_symbols:
-            skipped_duplicates.append({"symbol": symbol, "reason": "open_paper_position_exists"})
+            skipped = context | {"symbol": symbol, "reason": "open_paper_position_exists"}
+            skipped_duplicates.append(skipped)
+            missed_triggers.append(missed_trigger_record(skipped))
+            candidate_results.append(candidate_result_record(context, selected=False, reason="open_paper_position_exists"))
             continue
         entry_key = (symbol, str(position.get("entry_date") or ""))
         if entry_key in paper_journal_entries:
-            skipped_duplicates.append(
-                {
-                    "symbol": symbol,
-                    "entry_date": entry_key[1],
-                    "reason": "symbol_already_recorded_for_entry_date",
-                }
+            skipped = context | {
+                "symbol": symbol,
+                "entry_date": entry_key[1],
+                "reason": "symbol_already_recorded_for_entry_date",
+            }
+            skipped_duplicates.append(skipped)
+            missed_triggers.append(missed_trigger_record(skipped))
+            candidate_results.append(
+                candidate_result_record(context, selected=False, reason="symbol_already_recorded_for_entry_date")
             )
             continue
         if remaining_slots is not None and remaining_slots <= 0:
-            skipped_portfolio_full.append(
-                {
-                    "symbol": symbol,
-                    "entry_date": entry_key[1],
-                    "reason": portfolio_guard.get("block_reason") or "no_opening_slots_available",
-                    "max_positions": portfolio_guard.get("max_positions"),
-                    "open_positions": len(open_symbols),
-                }
-            )
+            reason = portfolio_guard.get("block_reason") or "no_opening_slots_available"
+            skipped = context | {
+                "symbol": symbol,
+                "entry_date": entry_key[1],
+                "reason": reason,
+                "max_positions": portfolio_guard.get("max_positions"),
+                "open_positions": len(open_symbols),
+            }
+            skipped_portfolio_full.append(skipped)
+            missed_triggers.append(missed_trigger_record(skipped))
+            candidate_results.append(candidate_result_record(context, selected=False, reason=reason))
             continue
+        position.update(context)
+        position["paper_slot_selected"] = True
+        position["paper_fill_status"] = "filled"
         new_positions.append(position)
+        candidate_results.append(candidate_result_record(context, selected=True, reason=None))
         open_symbols.add(symbol)
         paper_journal_entries.add(entry_key)
         if remaining_slots is not None:
@@ -157,6 +178,50 @@ def build_paper_update(
         "skipped_duplicates": skipped_duplicates,
         "skipped_portfolio_full": skipped_portfolio_full,
         "skipped_invalid": skipped_invalid,
+        "missed_triggers": missed_triggers,
+        "candidate_results": candidate_results,
+    }
+
+
+def paper_recordable_action(item: dict[str, Any], *, include_actionable: bool) -> bool:
+    action = item.get("action")
+    return action == "observe_only_no_manual_entry" or (include_actionable and action == "prepare_manual_entry")
+
+
+def paper_trigger_sort_key(item: dict[str, Any]) -> tuple[float, float, float, str]:
+    return (
+        -as_float(item.get("trigger_rank_score")),
+        -as_float(item.get("signal_score")),
+        -as_float(item.get("confirmation_margin_pct")),
+        str(item.get("symbol") or ""),
+    )
+
+
+def paper_candidate_context(item: dict[str, Any], *, rank: int) -> dict[str, Any]:
+    return {
+        "symbol": str(item.get("symbol") or "").upper(),
+        "entry_date": item.get("planned_entry_date"),
+        "last_bar_time_et": item.get("last_bar_time_et"),
+        "paper_candidate_rank": rank,
+        "trigger_rank_score": item.get("trigger_rank_score"),
+        "signal_score": item.get("signal_score"),
+        "confirmation_margin_pct": item.get("confirmation_margin_pct"),
+    }
+
+
+def missed_trigger_record(item: dict[str, Any]) -> dict[str, Any]:
+    return dict(item) | {
+        "paper_fill_status": "triggered_but_not_filled",
+        "paper_slot_selected": False,
+        "paper_skip_reason": item.get("reason"),
+    }
+
+
+def candidate_result_record(context: dict[str, Any], *, selected: bool, reason: str | None) -> dict[str, Any]:
+    return dict(context) | {
+        "paper_slot_selected": selected,
+        "paper_fill_status": "filled" if selected else "triggered_but_not_filled",
+        "paper_skip_reason": reason,
     }
 
 

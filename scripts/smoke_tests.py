@@ -4,6 +4,7 @@ from __future__ import annotations
 import sys
 import os
 import json
+import shutil
 from argparse import Namespace
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -20,7 +21,16 @@ if str(SRC_ROOT) not in sys.path:
 from liubang.earnings import EarningsCalendar, EarningsEvent
 from liubang.data_quality import evaluate_data_quality
 from liubang.dynamic_universe import select_dynamic_universe
-from liubang.backtest import BacktestParams, summarize_trades, symbol_cooldown_end_date, write_backtest_trades_csv
+from liubang.backtest import (
+    BacktestParams,
+    Candidate,
+    apply_candidate_scoring_mode,
+    filter_candidates_for_regime_policy,
+    filter_watchlist_for_regime_policy,
+    summarize_trades,
+    symbol_cooldown_end_date,
+    write_backtest_trades_csv,
+)
 from liubang.cli_utils import load_zshrc_env_vars, parse_null_delimited_env, summarize_history_sources
 from liubang.defaults import DEFAULT_HARD_STOP_PCT, DEFAULT_MAX_PULLBACK_PCT, DEFAULT_MIN_SCORE
 from liubang.journal import aggregate_trades, parse_journal_lot, summarize_journal
@@ -59,7 +69,7 @@ from scripts.generate_signals import apply_symbol_cooldown, weekday_cooldown_end
 from scripts.apply_paper_actions import build_paper_action_update
 from scripts.record_paper_triggers import build_paper_update
 from scripts.render_dashboard import build_dashboard_model, render_dashboard_html
-from scripts.generate_daily_review import build_review_model, render_review_html
+from scripts.generate_daily_review import build_review_model, build_review_sample_rows, render_review_html
 from scripts.run_daily_proxy_backtest import parse_daily_bars
 from scripts.summarize_journal import safe_report_prefix
 from scripts.sweep_cooldown import parse_int_list, parse_mode_list, symbol_concentration as cooldown_symbol_concentration
@@ -71,6 +81,7 @@ def main() -> int:
     test_zshrc_env_loader()
     test_report_prefix_sanitizer()
     test_default_parameters()
+    test_ranked_scoring_mode_reranks_candidates()
     test_symbol_cooldown_helpers()
     test_history_source_summary()
     test_earnings_rules()
@@ -110,6 +121,7 @@ def main() -> int:
     test_paper_action_update_partial_and_exit()
     test_trigger_template_export_payload()
     test_position_monitor_target()
+    test_position_monitor_post_target_uses_close_stop()
     test_position_monitor_ignores_pre_entry_stop()
     test_dashboard_model_and_html()
     test_daily_review_model_and_html()
@@ -182,7 +194,170 @@ def test_default_parameters() -> None:
     assert params.max_pullback_pct == DEFAULT_MAX_PULLBACK_PCT
     assert params.hard_stop_pct == DEFAULT_HARD_STOP_PCT
     assert params.symbol_cooldown_days == 0
+    assert params.scoring_mode == "ranked_v2"
+    assert params.regime_aware_v2_filters is True
+    assert params.strong_regime_min_rs20_rank == 0.65
+    assert params.strong_regime_min_overlay_score == 7.4
     assert sizing.hard_stop_pct == DEFAULT_HARD_STOP_PCT
+
+
+def test_ranked_scoring_mode_reranks_candidates() -> None:
+    signal_date = date(2026, 5, 18)
+    entry_date = date(2026, 5, 19)
+    candidates = [
+        Candidate(
+            symbol="OLD_HIGH_SCORE",
+            signal_date=signal_date,
+            entry_date=entry_date,
+            score=8.0,
+            strength_score=5.0,
+            pullback_score=4.0,
+            pullback_pct=0.03,
+            prev_close=100.0,
+            technical_stop=98.0,
+            regime="neutral",
+            notes=[],
+            factor_data={
+                "classic_score": 8.0,
+                "rs_20d": -0.02,
+                "rs_60d": -0.01,
+                "sma20_distance_pct": 0.01,
+                "near_20d_high": 0.94,
+                "pullback_atr": 3.0,
+                "volume_ratio_5d": 1.4,
+                "close_location": 0.2,
+            },
+        ),
+        Candidate(
+            symbol="BETTER_RANKED",
+            signal_date=signal_date,
+            entry_date=entry_date,
+            score=7.9,
+            strength_score=4.0,
+            pullback_score=3.1,
+            pullback_pct=0.025,
+            prev_close=100.0,
+            technical_stop=98.0,
+            regime="neutral",
+            notes=[],
+            factor_data={
+                "classic_score": 7.9,
+                "rs_20d": 0.08,
+                "rs_60d": 0.12,
+                "sma20_distance_pct": 0.08,
+                "near_20d_high": 0.99,
+                "pullback_atr": 1.2,
+                "volume_ratio_5d": 0.65,
+                "close_location": 0.9,
+            },
+        ),
+        Candidate(
+            symbol="MIDDLE",
+            signal_date=signal_date,
+            entry_date=entry_date,
+            score=8.0,
+            strength_score=4.5,
+            pullback_score=3.5,
+            pullback_pct=0.028,
+            prev_close=100.0,
+            technical_stop=98.0,
+            regime="neutral",
+            notes=[],
+            factor_data={
+                "classic_score": 8.0,
+                "rs_20d": 0.02,
+                "rs_60d": 0.04,
+                "sma20_distance_pct": 0.04,
+                "near_20d_high": 0.97,
+                "pullback_atr": 1.2,
+                "volume_ratio_5d": 1.0,
+                "close_location": 0.5,
+            },
+        ),
+    ]
+    ranked = apply_candidate_scoring_mode(candidates, "ranked_v1")
+    by_symbol = {candidate.symbol: candidate for candidate in ranked}
+    assert by_symbol["BETTER_RANKED"].score > by_symbol["OLD_HIGH_SCORE"].score
+    assert by_symbol["BETTER_RANKED"].factor_data["ranked_v1_score"] == by_symbol["BETTER_RANKED"].score
+    ranked_v2 = apply_candidate_scoring_mode(candidates, "ranked_v2")
+    by_symbol_v2 = {candidate.symbol: candidate for candidate in ranked_v2}
+    assert by_symbol_v2["BETTER_RANKED"].score > by_symbol_v2["OLD_HIGH_SCORE"].score
+    assert by_symbol_v2["BETTER_RANKED"].factor_data["ranked_v2_score"] == by_symbol_v2["BETTER_RANKED"].score
+    assert candidates[0].score == 8.0
+
+
+def test_regime_aware_v2_candidate_filters() -> None:
+    params = BacktestParams()
+    signal_date = date(2026, 5, 18)
+    entry_date = date(2026, 5, 19)
+
+    def candidate(symbol: str, *, regime: str, score: float = 7.5, rs20: float = 0.7, overlay: float = 7.5, atr: float = 0.06, pullback: float = 0.04) -> Candidate:
+        return Candidate(
+            symbol=symbol,
+            signal_date=signal_date,
+            entry_date=entry_date,
+            score=score,
+            strength_score=4.0,
+            pullback_score=3.5,
+            pullback_pct=pullback,
+            prev_close=100.0,
+            technical_stop=98.0,
+            regime=regime,
+            notes=[],
+            factor_data={
+                "ranked_v2_rs_20d_rank": rs20,
+                "ranked_v2_overlay_score": overlay,
+                "atr20_pct": atr,
+            },
+        )
+
+    filtered = filter_candidates_for_regime_policy(
+        [
+            candidate("STRONG_PASS", regime="strong"),
+            candidate("STRONG_WEAK_RS", regime="strong", rs20=0.6),
+            candidate("STRONG_HIGH_ATR", regime="strong", atr=0.09),
+            candidate("NEUTRAL_PASS", regime="neutral", rs20=0.0, overlay=0.0, atr=0.2, pullback=0.06),
+            candidate("WEAK_BLOCK", regime="weak"),
+        ],
+        params,
+    )
+
+    assert [item.symbol for item in filtered] == ["STRONG_PASS", "NEUTRAL_PASS"]
+    assert any("regime-aware v2 strong filter" in note for note in filtered[0].notes)
+
+
+def test_regime_aware_v2_watchlist_filters() -> None:
+    params = BacktestParams()
+    watchlist = [
+        {
+            "symbol": "STRONG_PASS",
+            "market_regime": "strong",
+            "total_score": 7.5,
+            "pullback_pct": 0.04,
+            "risk_notes": [],
+            "factor_data": {
+                "ranked_v2_rs_20d_rank": 0.7,
+                "ranked_v2_overlay_score": 7.5,
+                "atr20_pct": 0.06,
+            },
+        },
+        {
+            "symbol": "WEAK_BLOCK",
+            "market_regime": "weak",
+            "total_score": 9.0,
+            "pullback_pct": 0.02,
+            "risk_notes": [],
+            "factor_data": {
+                "ranked_v2_rs_20d_rank": 1.0,
+                "ranked_v2_overlay_score": 9.0,
+                "atr20_pct": 0.02,
+            },
+        },
+    ]
+
+    filtered = filter_watchlist_for_regime_policy(watchlist, params)
+    assert [item["symbol"] for item in filtered] == ["STRONG_PASS"]
+    assert filtered[0]["regime_policy"] == "regime_aware_v2_strong"
 
 
 def test_symbol_cooldown_helpers() -> None:
@@ -984,6 +1159,7 @@ def test_research_suite_commands() -> None:
             min_score=7.0,
             min_pullback_pct=0.01,
             max_pullback_pct=0.06,
+            scoring_mode="classic",
             hard_stop_pct=0.03,
             symbol_cooldown_days=3,
             refresh=False,
@@ -1006,6 +1182,7 @@ def test_research_suite_commands() -> None:
     assert "--fail-on-gate-failure" in commands[-1][1]
     assert "config/research_universe_dynamic.json" in commands[0][1]
     assert "--symbol-cooldown-days" in commands[0][1]
+    assert "--scoring-mode" in commands[0][1]
 
 
 def test_workflow_signal_strategy_command() -> None:
@@ -1026,6 +1203,7 @@ def test_workflow_signal_strategy_command() -> None:
             min_score=7.0,
             min_pullback_pct=None,
             max_pullback_pct=0.06,
+            scoring_mode=None,
             symbol_cooldown_days=3,
             cooldown_journal_file="data/paper_trade_journal.csv",
             account_equity=None,
@@ -1112,6 +1290,23 @@ def test_intraday_trigger_evaluation() -> None:
     assert result.manual_position_template["symbol"] == "AAPL"
     assert result.manual_position_template["remaining_shares"] == result.trade_plan["suggested_shares"]
 
+    suspect = evaluate_intraday_trigger(
+        signal=signal,
+        history_payload={
+            "payload": {
+                "candles": [
+                    candle("2026-05-20T13:30:00+00:00", 10.0, 10.2, 9.9, 10.1, 1_000),
+                    candle("2026-05-20T13:35:00+00:00", 10.1, 10.3, 10.0, 10.2, 0),
+                    candle("2026-05-20T13:40:00+00:00", 10.2, 10.6, 10.2, 10.5, 0),
+                ]
+            }
+        },
+        current_session_date=date(2026, 5, 20),
+    )
+    assert suspect.status == "data_suspect"
+    assert not suspect.triggered
+    assert suspect.data_quality_warnings == ["zero_volume_latest_two_bars"]
+
 
 def test_duplicate_position_blocks_actionable_trigger() -> None:
     signal = {
@@ -1192,6 +1387,8 @@ def test_observation_only_blocks_manual_trigger_template() -> None:
     assert report["actionable_triggered_count"] == 0
     assert report["observation_only"]
     assert item["action"] == "observe_only_no_manual_entry"
+    assert item["trigger_rank_score"] > 0
+    assert "weekly_gex_risk_tags" in item
     assert "manual_position_template" not in item
 
 
@@ -1205,6 +1402,9 @@ def test_paper_trigger_update_payload() -> None:
                     "action": "observe_only_no_manual_entry",
                     "planned_entry_date": "2026-05-20",
                     "last_bar_time_et": "2026-05-20T09:35:00-04:00",
+                    "trigger_rank_score": 80.0,
+                    "signal_score": 8.0,
+                    "confirmation_margin_pct": 0.01,
                     "trade_plan": {
                         "entry_price_reference": 10.5,
                         "stop_price": 9.9,
@@ -1234,7 +1434,12 @@ def test_paper_trigger_update_payload() -> None:
     assert update["new_positions"][0]["symbol"] == "AAPL"
     assert update["new_positions"][0]["entry_price"] == 10.5
     assert update["new_positions"][0]["entry_time_et"] == "2026-05-20T09:35:00-04:00"
+    assert update["new_positions"][0]["paper_candidate_rank"] == 1
+    assert update["new_positions"][0]["paper_slot_selected"] is True
     assert update["skipped_duplicates"][0]["symbol"] == "MSFT"
+    assert update["missed_triggers"][0]["symbol"] == "MSFT"
+    assert update["missed_triggers"][0]["paper_fill_status"] == "triggered_but_not_filled"
+    assert len(update["candidate_results"]) == 2
 
     reentry_blocked = build_paper_update(
         {
@@ -1260,6 +1465,7 @@ def test_paper_trigger_update_payload() -> None:
     )
     assert reentry_blocked["new_positions"] == []
     assert reentry_blocked["skipped_duplicates"][0]["reason"] == "symbol_already_recorded_for_entry_date"
+    assert reentry_blocked["missed_triggers"][0]["paper_skip_reason"] == "symbol_already_recorded_for_entry_date"
 
 
 def test_paper_trigger_update_respects_opening_slots() -> None:
@@ -1271,6 +1477,7 @@ def test_paper_trigger_update_respects_opening_slots() -> None:
                 "triggered": True,
                 "action": "observe_only_no_manual_entry",
                 "planned_entry_date": "2026-05-20",
+                "trigger_rank_score": 50.0,
                 "trade_plan": {
                     "entry_price_reference": 10.5,
                     "stop_price": 9.9,
@@ -1283,6 +1490,7 @@ def test_paper_trigger_update_respects_opening_slots() -> None:
                 "triggered": True,
                 "action": "observe_only_no_manual_entry",
                 "planned_entry_date": "2026-05-20",
+                "trigger_rank_score": 90.0,
                 "trade_plan": {
                     "entry_price_reference": 20.5,
                     "stop_price": 19.9,
@@ -1299,9 +1507,12 @@ def test_paper_trigger_update_respects_opening_slots() -> None:
         source_path=Path("triggers_test.json"),
     )
     assert len(update["new_positions"]) == 1
-    assert update["new_positions"][0]["symbol"] == "AAPL"
-    assert update["skipped_portfolio_full"][0]["symbol"] == "MSFT"
+    assert update["new_positions"][0]["symbol"] == "MSFT"
+    assert update["new_positions"][0]["paper_candidate_rank"] == 1
+    assert update["skipped_portfolio_full"][0]["symbol"] == "AAPL"
+    assert update["skipped_portfolio_full"][0]["paper_candidate_rank"] == 2
     assert update["skipped_portfolio_full"][0]["reason"] == "no_opening_slots_available"
+    assert update["missed_triggers"][0]["symbol"] == "AAPL"
 
     full_update = build_paper_update(
         trigger_report,
@@ -1344,6 +1555,17 @@ def test_paper_action_update_partial_and_exit() -> None:
                     "target_price": 21.0,
                     "target_hit": True,
                 },
+                {
+                    "symbol": "GOOG",
+                    "entry_date": "2026-05-20",
+                    "entry_price": 30.0,
+                    "shares": 20,
+                    "remaining_shares": 10,
+                    "initial_stop_price": 29.0,
+                    "current_stop_price": 30.0,
+                    "target_price": 31.0,
+                    "target_hit": True,
+                },
             ]
         },
         position_report={
@@ -1370,6 +1592,18 @@ def test_paper_action_update_partial_and_exit() -> None:
                     "latest_session_date": "2026-05-22",
                     "stop_reference": 20.0,
                 },
+                {
+                    "symbol": "GOOG",
+                    "needs_attention": True,
+                    "action": "raise_trailing_stop",
+                    "entry_date": "2026-05-20",
+                    "latest_session_date": "2026-05-22",
+                    "stop_reference": 30.8,
+                    "update_hint": {
+                        "set_current_stop_price": 30.8,
+                        "previous_stop_price": 30.0,
+                    },
+                },
             ]
         },
         source_path=Path("positions_test.json"),
@@ -1379,7 +1613,10 @@ def test_paper_action_update_partial_and_exit() -> None:
     assert update["positions_after"][0]["symbol"] == "AAPL"
     assert update["positions_after"][0]["remaining_shares"] == 50
     assert update["positions_after"][0]["target_hit"]
-    assert len(update["positions_after"]) == 1
+    assert update["positions_after"][1]["symbol"] == "GOOG"
+    assert update["positions_after"][1]["current_stop_price"] == 30.8
+    assert len(update["positions_after"]) == 2
+    assert update["applied_actions"][2]["action"] == "raise_trailing_stop"
 
 
 def test_trigger_template_export_payload() -> None:
@@ -1429,8 +1666,94 @@ def test_position_monitor_target() -> None:
     result = evaluate_position(position=position, history_payload=payload)
     assert result.status == "take_partial"
     assert result.action == "sell_half_at_first_target"
+    assert result.initial_risk_per_share == 0.3
+    assert result.unrealized_pnl == 5.5
+    assert result.floating_r == 1.833
+    assert result.distance_to_stop_pct == 0.0806
+    assert result.distance_to_target_pct == -0.0047
     assert result.update_hint is not None
     assert result.update_hint["set_target_hit"]
+
+
+def test_position_monitor_post_target_uses_close_stop() -> None:
+    position = ManualPosition(
+        symbol="AAPL",
+        entry_date=date(2026, 5, 20),
+        entry_time_et=datetime(2026, 5, 20, 9, 35, tzinfo=ZoneInfo("America/New_York")),
+        entry_price=10.0,
+        shares=10,
+        remaining_shares=5,
+        initial_stop_price=9.7,
+        current_stop_price=10.0,
+        target_price=10.5,
+        target_hit=True,
+    )
+    hold_payload = {
+        "payload": {
+            "candles": [
+                candle("2026-05-20T13:40:00+00:00", 10.1, 10.2, 9.8, 10.05, 1_000),
+            ]
+        }
+    }
+    hold_result = evaluate_position(position=position, history_payload=hold_payload)
+    assert hold_result.status == "hold"
+    assert hold_result.reason == "no_exit_or_partial_condition_met"
+    assert hold_result.floating_r == 0.167
+    assert hold_result.distance_to_stop_pct == 0.005
+
+    trail_payload = {
+        "payload": {
+            "candles": [
+                candle("2026-05-20T13:40:00+00:00", 10.1, 10.5, 10.1, 10.45, 1_000),
+                candle("2026-05-20T13:45:00+00:00", 10.45, 10.9, 10.4, 10.8, 1_000),
+                candle("2026-05-20T13:50:00+00:00", 10.8, 10.85, 10.7, 10.75, 1_000),
+            ]
+        }
+    }
+    trail_result = evaluate_position(position=position, history_payload=trail_payload)
+    assert trail_result.status == "adjust_stop"
+    assert trail_result.action == "raise_trailing_stop"
+    assert trail_result.stop_reference == 10.5
+    assert trail_result.trailing_peak_close == 10.8
+    assert trail_result.update_hint is not None
+    assert trail_result.update_hint["set_current_stop_price"] == 10.5
+
+    trailed_position = ManualPosition(
+        symbol="AAPL",
+        entry_date=date(2026, 5, 20),
+        entry_time_et=datetime(2026, 5, 20, 9, 35, tzinfo=ZoneInfo("America/New_York")),
+        entry_price=10.0,
+        shares=10,
+        remaining_shares=5,
+        initial_stop_price=9.7,
+        current_stop_price=10.5,
+        target_price=10.5,
+        target_hit=True,
+    )
+    trailing_exit_payload = {
+        "payload": {
+            "candles": [
+                candle("2026-05-20T13:40:00+00:00", 10.1, 10.5, 10.1, 10.45, 1_000),
+                candle("2026-05-20T13:45:00+00:00", 10.45, 10.9, 10.4, 10.8, 1_000),
+                candle("2026-05-20T13:50:00+00:00", 10.8, 10.85, 10.4, 10.45, 1_000),
+            ]
+        }
+    }
+    trailing_exit = evaluate_position(position=trailed_position, history_payload=trailing_exit_payload)
+    assert trailing_exit.status == "exit"
+    assert trailing_exit.reason == "latest_close_below_post_target_trailing_stop_reference"
+
+    exit_payload = {
+        "payload": {
+            "candles": [
+                candle("2026-05-20T13:40:00+00:00", 10.1, 10.2, 9.8, 9.95, 1_000),
+            ]
+        }
+    }
+    exit_result = evaluate_position(position=position, history_payload=exit_payload)
+    assert exit_result.status == "exit"
+    assert exit_result.action == "exit_remaining_breakeven_or_stop"
+    assert exit_result.reason == "latest_close_below_post_target_stop_reference"
 
 
 def test_position_monitor_ignores_pre_entry_stop() -> None:
@@ -1459,10 +1782,13 @@ def test_position_monitor_ignores_pre_entry_stop() -> None:
     assert result.status == "hold"
     assert result.action == "hold"
     assert result.reason == "no_exit_or_partial_condition_met"
+    assert result.floating_r == 0.333
+    assert result.unrealized_pnl == 1.0
 
 
 def test_dashboard_model_and_html() -> None:
     root = Path("data/cache/dashboard_smoke")
+    shutil.rmtree(root, ignore_errors=True)
     exports = root / "exports"
     exports.mkdir(parents=True, exist_ok=True)
     generated = "2026-05-20T13:40:00+00:00"
@@ -1535,7 +1861,16 @@ def test_dashboard_model_and_html() -> None:
                 "generated_at": generated,
                 "position_count": 1,
                 "attention_count": 0,
-                "evaluations": [{"symbol": "AAPL", "status": "hold", "action": "hold", "latest_close": 101.0}],
+                "evaluations": [
+                    {
+                        "symbol": "AAPL",
+                        "status": "hold",
+                        "action": "hold",
+                        "latest_close": 101.0,
+                        "stop_reference": 100.7,
+                        "trailing_stop_reference": 100.7,
+                    }
+                ],
             }
         ),
         encoding="utf-8",
@@ -1553,8 +1888,9 @@ def test_dashboard_model_and_html() -> None:
                         "shares": 10,
                         "remaining_shares": 10,
                         "initial_stop_price": 97.0,
-                        "current_stop_price": 97.0,
+                        "current_stop_price": 100.5,
                         "target_price": 103.0,
+                        "target_hit": True,
                     }
                 ]
             }
@@ -1595,12 +1931,16 @@ def test_dashboard_model_and_html() -> None:
     assert "+1.00%" in html_text
     assert "Call Wall" in html_text
     assert "$1.20M" in html_text
+    assert "Trail Ref" in html_text
+    assert "trailing" in html_text
+    assert "100.70" in html_text
     assert "+0.33R" in html_text
     assert 'http-equiv="refresh" content="10"' in html_text
 
 
 def test_daily_review_model_and_html() -> None:
     root = Path("data/cache/review_smoke")
+    shutil.rmtree(root, ignore_errors=True)
     exports = root / "exports"
     exports.mkdir(parents=True, exist_ok=True)
     generated = "2026-05-20T14:00:00+00:00"
@@ -1608,8 +1948,8 @@ def test_daily_review_model_and_html() -> None:
         json.dumps(
             {
                 "generated_at": generated,
-                "status": "ok",
-                "steps": [{"name": "triggers", "status": "ok", "reason": "done"}],
+                "status": "skipped",
+                "steps": [{"name": "triggers", "status": "skipped", "reason": "outside ET market window"}],
             }
         ),
         encoding="utf-8",
@@ -1629,6 +1969,15 @@ def test_daily_review_model_and_html() -> None:
                         "close": 100.0,
                         "source": "fixed_core",
                         "trade_plan": {"suggested_shares": 10},
+                        "news_risk": {"level": "high"},
+                        "options_context": {
+                            "weekly_gex": {
+                                "regime": "positive",
+                                "net_gex": 1200000.0,
+                                "call_wall": 105.0,
+                                "put_wall": 95.0,
+                            }
+                        },
                     },
                     {
                         "symbol": "MSFT",
@@ -1638,14 +1987,31 @@ def test_daily_review_model_and_html() -> None:
                         "close": 200.0,
                         "source": "fixed_core",
                         "trade_plan": {"suggested_shares": 5},
+                        "options_context": {
+                            "weekly_gex": {
+                                "regime": "neutral",
+                                "net_gex": 0.0,
+                                "call_wall": 205.0,
+                                "put_wall": 195.0,
+                            }
+                        },
                     },
                 ],
                 "history_sources": {"by_source": {"schwab": 2}, "fallback_count": 0},
+                "portfolio_guard": {
+                    "current_positions": 3,
+                    "max_positions": 2,
+                    "available_slots": 0,
+                    "current_gross_exposure_value": 50000.0,
+                    "max_gross_exposure_value": 40000.0,
+                    "current_gross_exposure_pct": 0.5,
+                    "allow_new_entries": False,
+                },
             }
         ),
         encoding="utf-8",
     )
-    (exports / "triggers_test.json").write_text(
+    (exports / "triggers_first_test.json").write_text(
         json.dumps(
             {
                 "generated_at": generated,
@@ -1657,13 +2023,41 @@ def test_daily_review_model_and_html() -> None:
                         "triggered": True,
                         "action": "observe_only_no_manual_entry",
                         "planned_entry_date": "2026-05-20",
+                        "last_bar_time_et": "2026-05-20T10:00:00-04:00",
                         "last_close": 101.0,
                         "trigger_price_reference": 100.8,
                         "stop_reference": 97.0,
+                        "risk_per_share_reference": 4.0,
+                        "weekly_gex_regime": "positive",
+                        "weekly_net_gex": 1200000.0,
                         "trade_plan": {"suggested_shares": 10},
                     },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (exports / "triggers_final_test.json").write_text(
+        json.dumps(
+            {
+                "generated_at": "2026-05-20T14:05:00+00:00",
+                "history_sources": {"by_source": {"schwab": 2}, "fallback_count": 0},
+                "evaluations": [
                     {
-                        "symbol": "MSFT",
+                        "symbol": "AAPL",
+                        "status": "invalidated",
+                        "triggered": False,
+                        "action": "keep_observing",
+                        "planned_entry_date": "2026-05-20",
+                        "last_bar_time_et": "2026-05-20T10:05:00-04:00",
+                        "last_close": 99.0,
+                        "trigger_price_reference": 100.8,
+                        "stop_reference": 97.0,
+                        "risk_per_share_reference": 4.0,
+                        "reason": "lost_trigger_confirmation",
+                    },
+                    {
+                        "symbol": "NVDA",
                         "status": "waiting_for_market_data",
                         "triggered": False,
                         "reason": "no_regular_session_candles_for_planned_entry_date",
@@ -1677,7 +2071,61 @@ def test_daily_review_model_and_html() -> None:
         json.dumps(
             {
                 "generated_at": generated,
-                "new_positions": [{"symbol": "AAPL", "entry_date": "2026-05-20"}],
+                "new_positions": [
+                    {
+                        "symbol": "AAPL",
+                        "entry_date": "2026-05-20",
+                        "paper_candidate_rank": 1,
+                        "paper_slot_selected": True,
+                        "paper_fill_status": "filled",
+                    }
+                ],
+                "missed_triggers": [
+                    {
+                        "symbol": "MSFT",
+                        "entry_date": "2026-05-20",
+                        "paper_candidate_rank": 2,
+                        "paper_slot_selected": False,
+                        "paper_fill_status": "triggered_but_not_filled",
+                        "paper_skip_reason": "no_opening_slots_available",
+                    },
+                    {
+                        "symbol": "MSFT",
+                        "entry_date": "2026-05-20",
+                        "paper_candidate_rank": 2,
+                        "paper_slot_selected": False,
+                        "paper_fill_status": "triggered_but_not_filled",
+                        "paper_skip_reason": "no_opening_slots_available",
+                    }
+                ],
+                "candidate_results": [
+                    {
+                        "symbol": "AAPL",
+                        "entry_date": "2026-05-20",
+                        "paper_candidate_rank": 1,
+                        "paper_slot_selected": True,
+                        "paper_fill_status": "filled",
+                    },
+                    {
+                        "symbol": "MSFT",
+                        "entry_date": "2026-05-20",
+                        "paper_candidate_rank": 2,
+                        "paper_slot_selected": False,
+                        "paper_fill_status": "triggered_but_not_filled",
+                        "paper_skip_reason": "no_opening_slots_available",
+                    },
+                ],
+                "skipped_duplicates": [],
+                "skipped_invalid": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (exports / "paper_positions_update_old_bug.json").write_text(
+        json.dumps(
+            {
+                "generated_at": "2026-05-20T13:40:00+00:00",
+                "new_positions": [{"symbol": "BUG", "entry_date": "2026-05-20"}],
                 "skipped_duplicates": [],
                 "skipped_invalid": [],
             }
@@ -1701,11 +2149,12 @@ def test_daily_review_model_and_html() -> None:
             {
                 "positions": [
                     {
-                        "symbol": "MSFT",
+                        "symbol": "NVDA",
                         "entry_date": "2026-05-20",
                         "entry_price": 200.0,
                         "shares": 5,
                         "remaining_shares": 5,
+                        "entry_time_et": "2026-05-20T10:20:00-04:00",
                         "initial_stop_price": 194.0,
                         "current_stop_price": 194.0,
                         "target_price": 206.0,
@@ -1720,7 +2169,7 @@ def test_daily_review_model_and_html() -> None:
         "\n".join(
             [
                 "trade_id,symbol,side,entry_date,exit_date,entry_price,exit_price,shares,initial_stop_price,fees,setup,source,notes",
-                "AAPL-1,AAPL,long,2026-05-20,2026-05-20,100,103,10,97,0,strong_pullback,paper,test",
+                "AAPL-1,AAPL,long,2026-05-20,2026-05-20,100,103,10,97,0,strong_pullback,paper,target_1 smoke",
             ]
         )
         + "\n",
@@ -1737,13 +2186,46 @@ def test_daily_review_model_and_html() -> None:
     assert model["metrics"]["triggered_today_count"] == 1
     assert model["metrics"]["open_paper_positions"] == 1
     assert model["metrics"]["today_realized_pnl"] == 30.0
+    assert model["metrics"]["data_issue_count"] == 2
+    assert model["metrics"]["paper_exposure_breach"]
+    assert model["metrics"]["paper_update_filtered_reports"] == 1
+    assert model["metrics"]["missed_paper_triggers"] == 1
     assert model["signals"]["is_review_date_signal"]
+    assert model["signals"]["watchlist"][0]["weekly_gex_regime"] == "positive"
     assert model["triggers"]["triggered_symbols"] == ["AAPL"]
+    assert model["triggers"]["final_evaluations"][0]["first_trigger_time_et"] == "2026-05-20T10:00:00-04:00"
+    assert model["triggers"]["final_evaluations"][0]["status"] == "invalidated"
+    assert any(item["name"] == "workflow_skipped" and item["severity"] == "info" for item in model["data_issues"])
+    assert any(item["name"] == "paper_update_boundary_filter" and item["severity"] == "info" for item in model["data_issues"])
+    assert any(item["name"] == "paper_exposure_breach" for item in model["data_issues"])
     assert model["paper_updates"]["new_positions"][0]["symbol"] == "AAPL"
+    assert len(model["paper_updates"]["missed_triggers"]) == 1
+    assert model["paper_updates"]["missed_triggers"][0]["symbol"] == "MSFT"
     assert model["paper_actions"]["actions"][0]["bucket"] == "applied_actions"
+    sample_rows = build_review_sample_rows(model)
+    assert sample_rows[0]["symbol"] == "AAPL"
+    assert sample_rows[0]["triggered_today"] is True
+    assert sample_rows[0]["first_trigger_time_et"] == "10:00"
+    assert sample_rows[0]["trigger_time_bucket"] == "morning"
+    assert sample_rows[0]["mfe_r_5m_close"] == 0.0
+    assert sample_rows[0]["mae_r_5m_close"] == -0.5
+    assert sample_rows[0]["weekly_net_gex"] == 1200000.0
+    assert sample_rows[0]["gex_risk_tags"] == "gex_positive"
+    assert sample_rows[0]["paper_candidate_rank"] == 1
+    assert sample_rows[0]["paper_fill_status"] == "filled"
+    assert sample_rows[0]["paper_status"] == "closed"
+    assert sample_rows[0]["paper_pnl"] == 30.0
+    assert sample_rows[0]["exit_reason"] == "target_1"
+    assert sample_rows[1]["paper_fill_status"] == "triggered_but_not_filled"
+    assert sample_rows[1]["paper_skip_reason"] == "no_opening_slots_available"
     html_text = render_review_html(model)
     assert "Liubang Daily Review" in html_text
     assert "今日触发" in html_text
+    assert "首次触发" in html_text
+    assert "Call Wall" in html_text
+    assert "$1.20M" in html_text
+    assert "paper exposure 超限" in html_text
+    assert "missed triggers=1" in html_text
     assert "AAPL" in html_text
     assert "$30.00" in html_text
 

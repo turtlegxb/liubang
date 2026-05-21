@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import math
 import csv
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, date, datetime, time
 from pathlib import Path
 from typing import Any
@@ -26,6 +26,17 @@ EASTERN = ZoneInfo("America/New_York")
 REGULAR_OPEN = time(9, 30)
 REGULAR_CLOSE = time(16, 0)
 NON_TRADABLE_CONTEXT_SYMBOLS = {"SPY", "QQQ", "XLK", "SMH"}
+SCORING_MODE_CLASSIC = "classic"
+SCORING_MODE_RANKED_V1 = "ranked_v1"
+SCORING_MODE_RANKED_V2 = "ranked_v2"
+SCORING_MODES = (SCORING_MODE_CLASSIC, SCORING_MODE_RANKED_V1, SCORING_MODE_RANKED_V2)
+DEFAULT_SCORING_MODE = SCORING_MODE_RANKED_V2
+DEFAULT_REGIME_AWARE_V2_FILTERS = True
+DEFAULT_STRONG_REGIME_MIN_RANKED_SCORE = 7.0
+DEFAULT_STRONG_REGIME_MAX_PULLBACK_PCT = 0.05
+DEFAULT_STRONG_REGIME_MIN_RS20_RANK = 0.65
+DEFAULT_STRONG_REGIME_MIN_OVERLAY_SCORE = 7.4
+DEFAULT_STRONG_REGIME_MAX_ATR20_PCT = 0.08
 
 
 @dataclass(frozen=True)
@@ -43,6 +54,13 @@ class BacktestParams:
     max_pullback_pct: float = DEFAULT_MAX_PULLBACK_PCT
     min_score: float = DEFAULT_MIN_SCORE
     symbol_cooldown_days: int = 0
+    scoring_mode: str = DEFAULT_SCORING_MODE
+    regime_aware_v2_filters: bool = DEFAULT_REGIME_AWARE_V2_FILTERS
+    strong_regime_min_ranked_score: float = DEFAULT_STRONG_REGIME_MIN_RANKED_SCORE
+    strong_regime_max_pullback_pct: float = DEFAULT_STRONG_REGIME_MAX_PULLBACK_PCT
+    strong_regime_min_rs20_rank: float = DEFAULT_STRONG_REGIME_MIN_RS20_RANK
+    strong_regime_min_overlay_score: float = DEFAULT_STRONG_REGIME_MIN_OVERLAY_SCORE
+    strong_regime_max_atr20_pct: float = DEFAULT_STRONG_REGIME_MAX_ATR20_PCT
 
 
 @dataclass(frozen=True)
@@ -81,6 +99,7 @@ class Candidate:
     technical_stop: float
     regime: str
     notes: list[str]
+    factor_data: dict[str, float | None] | None = None
 
 
 @dataclass
@@ -231,6 +250,418 @@ def latest_context_regimes(daily_by_symbol: dict[str, list[DailyBar]], symbols: 
     return output
 
 
+def validate_scoring_mode(scoring_mode: str) -> str:
+    if scoring_mode not in SCORING_MODES:
+        raise ValueError(f"Unsupported scoring_mode={scoring_mode!r}; expected one of {SCORING_MODES}")
+    return scoring_mode
+
+
+def use_regime_aware_v2_filters(params: BacktestParams) -> bool:
+    return bool(params.regime_aware_v2_filters and params.scoring_mode == SCORING_MODE_RANKED_V2)
+
+
+def regime_policy_summary(params: BacktestParams) -> dict[str, Any]:
+    if not use_regime_aware_v2_filters(params):
+        return {"enabled": False}
+    return {
+        "enabled": True,
+        "mode": "regime_aware_v2",
+        "strong": {
+            "min_ranked_score": params.strong_regime_min_ranked_score,
+            "max_pullback_pct": params.strong_regime_max_pullback_pct,
+            "min_rs20_rank": params.strong_regime_min_rs20_rank,
+            "min_overlay_score": params.strong_regime_min_overlay_score,
+            "max_atr20_pct": params.strong_regime_max_atr20_pct,
+        },
+        "neutral": "ranked_v2_normal_filters",
+        "weak": "block_new_entries",
+    }
+
+
+def filter_candidates_for_regime_policy(candidates: list[Candidate], params: BacktestParams) -> list[Candidate]:
+    if not use_regime_aware_v2_filters(params):
+        return list(candidates)
+    output = []
+    for candidate in candidates:
+        rejection_reasons = regime_policy_rejection_reasons(
+            regime=candidate.regime,
+            score=candidate.score,
+            pullback_pct=candidate.pullback_pct,
+            factors=candidate.factor_data or {},
+            params=params,
+        )
+        if rejection_reasons:
+            continue
+        notes = list(candidate.notes)
+        if candidate.regime == "strong":
+            notes.append("regime-aware v2 strong filter")
+        elif candidate.regime == "neutral":
+            notes.append("regime-aware v2 neutral filter")
+        output.append(replace(candidate, notes=notes))
+    return output
+
+
+def filter_watchlist_for_regime_policy(watchlist: list[dict[str, Any]], params: BacktestParams) -> list[dict[str, Any]]:
+    if not use_regime_aware_v2_filters(params):
+        return list(watchlist)
+    output = []
+    for item in watchlist:
+        rejection_reasons = regime_policy_rejection_reasons(
+            regime=str(item.get("market_regime") or "neutral"),
+            score=safe_numeric(item.get("total_score"), default=float("-inf")),
+            pullback_pct=safe_numeric(item.get("pullback_pct"), default=float("inf")),
+            factors=item.get("factor_data") or {},
+            params=params,
+        )
+        if rejection_reasons:
+            continue
+        updated = dict(item)
+        risk_notes = list(updated.get("risk_notes") or [])
+        if updated.get("market_regime") == "strong":
+            updated["regime_policy"] = "regime_aware_v2_strong"
+            risk_notes.append("regime_aware_v2_strong_filter")
+        else:
+            updated["regime_policy"] = "regime_aware_v2_neutral"
+            risk_notes.append("regime_aware_v2_neutral_filter")
+        updated["risk_notes"] = risk_notes
+        output.append(updated)
+    return output
+
+
+def regime_policy_rejection_reasons(
+    *,
+    regime: str,
+    score: float,
+    pullback_pct: float,
+    factors: dict[str, Any],
+    params: BacktestParams,
+) -> list[str]:
+    if not use_regime_aware_v2_filters(params):
+        return []
+    if regime == "weak":
+        return ["weak_regime_block_new_entries"]
+    if regime != "strong":
+        return []
+
+    reasons = []
+    if score < params.strong_regime_min_ranked_score:
+        reasons.append("strong_ranked_score_below_min")
+    if pullback_pct > params.strong_regime_max_pullback_pct:
+        reasons.append("strong_pullback_above_max")
+    if safe_numeric(factors.get("ranked_v2_rs_20d_rank"), default=float("-inf")) < params.strong_regime_min_rs20_rank:
+        reasons.append("strong_rs20_rank_below_min")
+    if safe_numeric(factors.get("ranked_v2_overlay_score"), default=float("-inf")) < params.strong_regime_min_overlay_score:
+        reasons.append("strong_overlay_below_min")
+    atr20_pct = safe_numeric(factors.get("atr20_pct"), default=None)
+    if atr20_pct is not None and atr20_pct > params.strong_regime_max_atr20_pct:
+        reasons.append("strong_atr20_above_max")
+    return reasons
+
+
+def safe_numeric(value: Any, *, default: float | None) -> float | None:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return default
+    return numeric if math.isfinite(numeric) else default
+
+
+def build_scoring_factor_data(
+    *,
+    daily: list[DailyBar],
+    idx: int,
+    qqq_return20_by_date: dict[date, float],
+    qqq_return60_by_date: dict[date, float],
+    recent_high: float,
+    volume5_value: float | None,
+    sma20_value: float | None,
+    classic_score: float,
+) -> dict[str, float | None]:
+    bar = daily[idx]
+    closes = [item.close for item in daily]
+    highs = [item.high for item in daily]
+    symbol_ret20 = lookback_return(closes, idx, 20)
+    symbol_ret60 = lookback_return(closes, idx, 60)
+    high20 = max(highs[max(0, idx - 19) : idx + 1])
+    atr20 = average_true_range(daily, idx, 20)
+    pullback_atr = (recent_high - bar.close) / atr20 if atr20 and atr20 > 0 else None
+    close_range = bar.high - bar.low
+    close_location = (bar.close - bar.low) / close_range if close_range > 0 else 0.5
+    return {
+        "classic_score": round(classic_score, 5),
+        "rs_20d": round(symbol_ret20 - qqq_return20_by_date.get(bar.session_date, 0.0), 6)
+        if symbol_ret20 is not None
+        else None,
+        "rs_60d": round(symbol_ret60 - qqq_return60_by_date.get(bar.session_date, 0.0), 6)
+        if symbol_ret60 is not None
+        else None,
+        "sma20_distance_pct": round(bar.close / float(sma20_value) - 1.0, 6)
+        if sma20_value and sma20_value > 0
+        else None,
+        "near_20d_high": round(bar.close / high20, 6) if high20 > 0 else None,
+        "atr20_pct": round(atr20 / bar.close, 6) if atr20 and bar.close > 0 else None,
+        "pullback_atr": round(pullback_atr, 6) if pullback_atr is not None else None,
+        "volume_ratio_5d": round(bar.volume / float(volume5_value), 6)
+        if volume5_value and volume5_value > 0
+        else None,
+        "close_location": round(clamp(close_location, 0.0, 1.0), 6),
+    }
+
+
+def lookback_return(values: list[float], idx: int, lookback: int) -> float | None:
+    if idx < lookback:
+        return None
+    previous = values[idx - lookback]
+    if previous <= 0:
+        return None
+    return values[idx] / previous - 1.0
+
+
+def average_true_range(daily: list[DailyBar], idx: int, window: int) -> float | None:
+    if idx <= 0:
+        return None
+    start = max(1, idx - window + 1)
+    ranges = []
+    for cursor in range(start, idx + 1):
+        bar = daily[cursor]
+        previous_close = daily[cursor - 1].close
+        ranges.append(
+            max(
+                bar.high - bar.low,
+                abs(bar.high - previous_close),
+                abs(bar.low - previous_close),
+            )
+        )
+    return sum(ranges) / len(ranges) if ranges else None
+
+
+def apply_candidate_scoring_mode(candidates: list[Candidate], scoring_mode: str) -> list[Candidate]:
+    scoring_mode = validate_scoring_mode(scoring_mode)
+    if scoring_mode == SCORING_MODE_CLASSIC:
+        return list(candidates)
+
+    score_rows = build_score_rows_for_mode(
+        [candidate.factor_data or {} for candidate in candidates],
+        scoring_mode=scoring_mode,
+    )
+    ranked_candidates = []
+    for candidate, score_row in zip(candidates, score_rows, strict=True):
+        factor_data = dict(candidate.factor_data or {})
+        factor_data[f"{scoring_mode}_score"] = score_row["score"]
+        for key, value in score_row["components"].items():
+            factor_data[f"{scoring_mode}_{key}"] = value
+        notes = list(candidate.notes)
+        notes.append(f"{scoring_mode} cross-sectional rank overlay")
+        ranked_candidates.append(
+            replace(
+                candidate,
+                score=score_row["score"],
+                notes=notes,
+                factor_data=factor_data,
+            )
+        )
+    return ranked_candidates
+
+
+def apply_watchlist_scoring_mode(watchlist: list[dict[str, Any]], scoring_mode: str) -> list[dict[str, Any]]:
+    scoring_mode = validate_scoring_mode(scoring_mode)
+    if scoring_mode == SCORING_MODE_CLASSIC:
+        return [dict(item, scoring_mode=SCORING_MODE_CLASSIC) for item in watchlist]
+
+    score_rows = build_score_rows_for_mode(
+        [item.get("factor_data") or {} for item in watchlist],
+        scoring_mode=scoring_mode,
+    )
+    output = []
+    for item, score_row in zip(watchlist, score_rows, strict=True):
+        updated = dict(item)
+        updated["classic_total_score"] = item.get("classic_total_score", item.get("total_score"))
+        updated["total_score"] = score_row["score"]
+        updated["scoring_mode"] = scoring_mode
+        updated["ranking_components"] = score_row["components"]
+        factor_data = dict(updated.get("factor_data") or {})
+        factor_data[f"{scoring_mode}_score"] = score_row["score"]
+        updated["factor_data"] = factor_data
+        risk_notes = list(updated.get("risk_notes") or [])
+        risk_notes.append(f"{scoring_mode}_cross_sectional_score")
+        updated["risk_notes"] = risk_notes
+        output.append(updated)
+    return output
+
+
+def build_score_rows_for_mode(
+    factors_by_item: list[dict[str, float | None]],
+    *,
+    scoring_mode: str,
+) -> list[dict[str, Any]]:
+    if scoring_mode == SCORING_MODE_RANKED_V1:
+        return build_ranked_v1_score_rows(factors_by_item)
+    if scoring_mode == SCORING_MODE_RANKED_V2:
+        return build_ranked_v2_score_rows(factors_by_item)
+    raise ValueError(f"Unsupported ranked scoring mode={scoring_mode!r}")
+
+
+def build_ranked_v1_score_rows(factors_by_item: list[dict[str, float | None]]) -> list[dict[str, Any]]:
+    factor_values = {
+        "rs_20d": numeric_factor_values(factors_by_item, "rs_20d"),
+        "rs_60d": numeric_factor_values(factors_by_item, "rs_60d"),
+        "sma20_distance_pct": numeric_factor_values(factors_by_item, "sma20_distance_pct"),
+        "near_20d_high": numeric_factor_values(factors_by_item, "near_20d_high"),
+        "volume_ratio_5d": numeric_factor_values(factors_by_item, "volume_ratio_5d"),
+        "close_location": numeric_factor_values(factors_by_item, "close_location"),
+    }
+    rows = []
+    for factors in factors_by_item:
+        components = {
+            "rs_20d_rank": percentile_rank(
+                factors.get("rs_20d"),
+                factor_values["rs_20d"],
+                higher_better=True,
+            ),
+            "rs_60d_rank": percentile_rank(
+                factors.get("rs_60d"),
+                factor_values["rs_60d"],
+                higher_better=True,
+            ),
+            "sma20_distance_rank": percentile_rank(
+                factors.get("sma20_distance_pct"),
+                factor_values["sma20_distance_pct"],
+                higher_better=True,
+            ),
+            "near_20d_high_rank": percentile_rank(
+                factors.get("near_20d_high"),
+                factor_values["near_20d_high"],
+                higher_better=True,
+            ),
+            "atr_pullback_quality": atr_pullback_quality(factors.get("pullback_atr")),
+            "volume_contraction_rank": percentile_rank(
+                factors.get("volume_ratio_5d"),
+                factor_values["volume_ratio_5d"],
+                higher_better=False,
+            ),
+            "close_location_rank": percentile_rank(
+                factors.get("close_location"),
+                factor_values["close_location"],
+                higher_better=True,
+            ),
+        }
+        overlay_score = (
+            components["rs_20d_rank"] * 3.0
+            + components["rs_60d_rank"] * 1.5
+            + components["sma20_distance_rank"] * 1.0
+            + components["near_20d_high_rank"] * 1.0
+            + components["atr_pullback_quality"] * 1.5
+            + components["volume_contraction_rank"] * 1.0
+            + components["close_location_rank"] * 1.0
+        )
+        classic_score = factors.get("classic_score")
+        if isinstance(classic_score, (int, float)) and math.isfinite(float(classic_score)):
+            score = float(classic_score) + (overlay_score - 5.0) * 0.15
+        else:
+            score = overlay_score
+        components["overlay_score"] = clamp(overlay_score, 0.0, 10.0)
+        rows.append(
+            {
+                "score": round(clamp(score, 0.0, 10.0), 3),
+                "components": {
+                    key: round(value, 4)
+                    for key, value in components.items()
+                },
+            }
+        )
+    return rows
+
+
+def build_ranked_v2_score_rows(factors_by_item: list[dict[str, float | None]]) -> list[dict[str, Any]]:
+    factor_values = {
+        "rs_20d": numeric_factor_values(factors_by_item, "rs_20d"),
+        "rs_60d": numeric_factor_values(factors_by_item, "rs_60d"),
+        "sma20_distance_pct": numeric_factor_values(factors_by_item, "sma20_distance_pct"),
+    }
+    rows = []
+    for factors in factors_by_item:
+        components = {
+            "rs_20d_rank": percentile_rank(
+                factors.get("rs_20d"),
+                factor_values["rs_20d"],
+                higher_better=True,
+            ),
+            "rs_60d_rank": percentile_rank(
+                factors.get("rs_60d"),
+                factor_values["rs_60d"],
+                higher_better=True,
+            ),
+            "sma20_distance_rank": percentile_rank(
+                factors.get("sma20_distance_pct"),
+                factor_values["sma20_distance_pct"],
+                higher_better=True,
+            ),
+        }
+        overlay_score = (
+            components["rs_20d_rank"] * 3.0
+            + components["rs_60d_rank"] * 2.0
+            + components["sma20_distance_rank"] * 1.0
+        ) / 6.0 * 10.0
+        classic_score = factors.get("classic_score")
+        if isinstance(classic_score, (int, float)) and math.isfinite(float(classic_score)):
+            score = float(classic_score) + (overlay_score - 5.0) * 0.20
+        else:
+            score = overlay_score
+        components["overlay_score"] = clamp(overlay_score, 0.0, 10.0)
+        rows.append(
+            {
+                "score": round(clamp(score, 0.0, 10.0), 3),
+                "components": {
+                    key: round(value, 4)
+                    for key, value in components.items()
+                },
+            }
+        )
+    return rows
+
+
+def numeric_factor_values(factors_by_item: list[dict[str, float | None]], key: str) -> list[float]:
+    values = []
+    for factors in factors_by_item:
+        value = factors.get(key)
+        if isinstance(value, (int, float)) and math.isfinite(float(value)):
+            values.append(float(value))
+    return values
+
+
+def percentile_rank(value: float | None, values: list[float], *, higher_better: bool) -> float:
+    if not isinstance(value, (int, float)) or not math.isfinite(float(value)) or not values:
+        return 0.5
+    sorted_values = sorted(values)
+    if len(sorted_values) == 1 or sorted_values[0] == sorted_values[-1]:
+        return 0.5
+    numeric_value = float(value)
+    equal_positions = [
+        idx for idx, item in enumerate(sorted_values)
+        if item == numeric_value
+    ]
+    if equal_positions:
+        average_position = sum(equal_positions) / len(equal_positions)
+    else:
+        lower_count = sum(1 for item in sorted_values if item < numeric_value)
+        average_position = lower_count
+    percentile = average_position / (len(sorted_values) - 1)
+    percentile = clamp(percentile, 0.0, 1.0)
+    return percentile if higher_better else 1.0 - percentile
+
+
+def atr_pullback_quality(value: float | None) -> float:
+    if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+        return 0.5
+    ideal = 1.2
+    tolerance = 1.2
+    return clamp(1.0 - abs(float(value) - ideal) / tolerance, 0.0, 1.0)
+
+
+def clamp(value: float, minimum: float, maximum: float) -> float:
+    return max(minimum, min(maximum, value))
+
+
 def generate_candidates(
     symbol: str,
     daily: list[DailyBar],
@@ -250,6 +681,8 @@ def generate_candidates(
     sma20 = rolling_mean(closes, 20)
     volume5 = rolling_mean(volumes, 5)
     qqq_return_by_date = return_by_date(qqq_daily, 10)
+    qqq_return20_by_date = return_by_date(qqq_daily, 20)
+    qqq_return60_by_date = return_by_date(qqq_daily, 60)
     trading_dates = [bar.session_date for bar in daily]
     blocked_entry_dates = (
         earnings_calendar.blocked_entry_dates(symbol, trading_dates)
@@ -310,6 +743,17 @@ def generate_candidates(
         if score < params.min_score:
             continue
 
+        factor_data = build_scoring_factor_data(
+            daily=daily,
+            idx=idx,
+            qqq_return20_by_date=qqq_return20_by_date,
+            qqq_return60_by_date=qqq_return60_by_date,
+            recent_high=recent_high,
+            volume5_value=volume5[idx],
+            sma20_value=sma20[idx],
+            classic_score=score,
+        )
+
         candidates.append(
             Candidate(
                 symbol=symbol,
@@ -323,6 +767,7 @@ def generate_candidates(
                 technical_stop=bar.low,
                 regime=regime,
                 notes=notes,
+                factor_data=factor_data,
             )
         )
     return candidates
@@ -335,6 +780,7 @@ def run_backtest(
     params: BacktestParams,
     earnings_calendar: EarningsCalendar | None = None,
 ) -> dict[str, Any]:
+    validate_scoring_mode(params.scoring_mode)
     candles_by_symbol = {
         symbol: parse_schwab_candles(history_by_symbol[symbol], regular_hours_only=True)
         for symbol in symbols
@@ -382,6 +828,22 @@ def run_backtest(
         for candidate in candidates:
             candidates_by_entry_date.setdefault(candidate.entry_date, []).append(candidate)
 
+    if params.scoring_mode != SCORING_MODE_CLASSIC:
+        candidates_by_entry_date = {
+            entry_date: apply_candidate_scoring_mode(candidates, params.scoring_mode)
+            for entry_date, candidates in candidates_by_entry_date.items()
+        }
+    pre_policy_candidate_count = sum(len(candidates) for candidates in candidates_by_entry_date.values())
+    candidates_by_entry_date = {
+        entry_date: filter_candidates_for_regime_policy(candidates, params)
+        for entry_date, candidates in candidates_by_entry_date.items()
+    }
+    all_candidates = [
+        candidate
+        for candidates in candidates_by_entry_date.values()
+        for candidate in candidates
+    ]
+
     all_dates = sorted(
         set().union(*(set(grouped) for grouped in intraday_by_symbol.values()))
     )
@@ -400,6 +862,8 @@ def run_backtest(
         "skipped_duplicate_symbol": 0,
         "skipped_symbol_cooldown": 0,
         "skipped_missing_intraday": 0,
+        "candidate_count_before_regime_policy": pre_policy_candidate_count,
+        "skipped_regime_policy": pre_policy_candidate_count - len(all_candidates),
     }
     blocked_symbols_until: dict[str, date] = {}
 
@@ -490,6 +954,7 @@ def run_backtest(
         "config": {
             "symbols": list(symbols),
             "params": asdict(params),
+            "regime_policy": regime_policy_summary(params),
             "earnings_filter": earnings_calendar.summary() if earnings_calendar else None,
         },
         "data": summarize_data(daily_by_symbol),
@@ -918,6 +1383,7 @@ def format_backtest_summary(report: dict[str, Any], report_path: Path) -> str:
     lines = [
         "Backtest summary",
         f"Symbols: {', '.join(report['config']['symbols'])}",
+        f"Scoring mode: {report['config']['params'].get('scoring_mode')}",
         f"Candidates: {report['candidate_count']}",
         f"Trades: {summary['trade_count']}",
         f"Entry attempts: {diagnostics.get('entry_attempts')} filled={diagnostics.get('filled_entries')} unfilled={diagnostics.get('unfilled_entries')}",
@@ -929,6 +1395,12 @@ def format_backtest_summary(report: dict[str, Any], report_path: Path) -> str:
         f"Max drawdown: {summary['max_drawdown_pct']}%",
         "Data:",
     ]
+    regime_policy = report.get("config", {}).get("regime_policy") or {}
+    if regime_policy.get("enabled"):
+        lines.insert(3, f"Regime policy: {regime_policy.get('mode')}")
+    skipped_regime_policy = diagnostics.get("skipped_regime_policy")
+    if skipped_regime_policy:
+        lines.insert(6, f"Regime policy skipped: {skipped_regime_policy}")
     history_sources = report.get("history_sources") or {}
     if history_sources:
         lines.insert(-1, f"History sources: {format_history_sources(history_sources)}")

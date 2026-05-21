@@ -13,7 +13,7 @@ SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from liubang.backtest import BacktestParams, NON_TRADABLE_CONTEXT_SYMBOLS, run_backtest
+from liubang.backtest import BacktestParams, NON_TRADABLE_CONTEXT_SYMBOLS, SCORING_MODES, run_backtest
 from liubang.cli_utils import load_earnings_for_symbols, load_env, load_histories
 from liubang.defaults import (
     DEFAULT_HARD_STOP_PCT,
@@ -42,6 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-score", type=float, default=DEFAULT_MIN_SCORE)
     parser.add_argument("--min-pullback-pct", type=float, default=DEFAULT_MIN_PULLBACK_PCT)
     parser.add_argument("--max-pullback-pct", type=float, default=DEFAULT_MAX_PULLBACK_PCT)
+    parser.add_argument("--scoring-mode", choices=SCORING_MODES, default=BacktestParams().scoring_mode)
     parser.add_argument("--hard-stop-pct", type=float, default=DEFAULT_HARD_STOP_PCT)
     parser.add_argument("--symbol-cooldown-days", type=int, default=0)
     return parser
@@ -81,6 +82,7 @@ def main() -> int:
             min_score=args.min_score,
             min_pullback_pct=args.min_pullback_pct,
             max_pullback_pct=args.max_pullback_pct,
+            scoring_mode=args.scoring_mode,
             hard_stop_pct=args.hard_stop_pct,
             symbol_cooldown_days=max(0, args.symbol_cooldown_days),
         )

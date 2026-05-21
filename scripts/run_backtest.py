@@ -14,6 +14,7 @@ if str(SRC_ROOT) not in sys.path:
 
 from liubang.backtest import (
     BacktestParams,
+    SCORING_MODES,
     format_backtest_summary,
     run_backtest,
     write_backtest_report,
@@ -57,6 +58,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-score", type=float, default=DEFAULT_MIN_SCORE)
     parser.add_argument("--min-pullback-pct", type=float, default=DEFAULT_MIN_PULLBACK_PCT)
     parser.add_argument("--max-pullback-pct", type=float, default=DEFAULT_MAX_PULLBACK_PCT)
+    parser.add_argument("--scoring-mode", choices=SCORING_MODES, default=BacktestParams().scoring_mode)
     parser.add_argument("--hard-stop-pct", type=float, default=DEFAULT_HARD_STOP_PCT)
     parser.add_argument("--risk-per-trade-pct", type=float, default=DEFAULT_RISK_PER_TRADE_PCT)
     parser.add_argument("--max-position-pct", type=float, default=DEFAULT_MAX_POSITION_PCT)
@@ -88,6 +90,7 @@ def main() -> int:
             min_score=args.min_score,
             min_pullback_pct=args.min_pullback_pct,
             max_pullback_pct=args.max_pullback_pct,
+            scoring_mode=args.scoring_mode,
             hard_stop_pct=args.hard_stop_pct,
             risk_per_trade_pct=args.risk_per_trade_pct,
             max_position_pct=args.max_position_pct,
