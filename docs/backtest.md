@@ -19,6 +19,7 @@
 - 第一目标达成后，剩余仓位止损移动到 breakeven
 - 第 5 个交易日强制退出
 - 可选单票冷却期，避免刚退出的股票立刻重新入选
+- 可选每日重新筛选退出，用于测试隔夜滞留持仓是否应在次日开盘退出
 
 ## 基础运行
 
@@ -89,6 +90,99 @@ config/core_universe.json
 ```bash
 .venv/bin/python scripts/sweep_backtest.py
 ```
+
+## 每日重新筛选退出
+
+默认实盘观察逻辑不会因为持仓第二天不再进入 watchlist 就自动退出。回测里可以开启实验规则：
+
+```bash
+.venv/bin/python scripts/run_backtest.py \
+  --universe config/research_universe_dynamic.json \
+  --hard-stop-pct 0.03 \
+  --symbol-cooldown-days 0 \
+  --reselection-exit-mode next_open_not_reselected
+```
+
+规则含义：
+
+- 每个交易日重新按当前策略生成最终候选集
+- 已持有且不是当日新开的仓位，如果 symbol 不在当日候选集中，则按当日第一根 5 分钟 K 的开盘价退出
+- 该退出发生在当日新开仓之前，因此会释放组合槽位
+
+也可以使用更贴近槽位替换的规则：
+
+```bash
+.venv/bin/python scripts/run_backtest.py \
+  --universe config/research_universe_dynamic.json \
+  --hard-stop-pct 0.03 \
+  --symbol-cooldown-days 0 \
+  --reselection-exit-mode next_open_not_reselected_when_slot_needed
+```
+
+这个模式只有在当日有新候选、且现有持仓占满槽位时，才会退出不再入选的旧仓。
+
+更保守的持仓质量替换规则：
+
+```bash
+.venv/bin/python scripts/run_backtest.py \
+  --universe config/research_universe_dynamic.json \
+  --hard-stop-pct 0.03 \
+  --symbol-cooldown-days 0 \
+  --reselection-exit-mode replace_weak_hold_when_slot_needed
+```
+
+这个模式会为开放持仓计算独立的 `hold_score`。只有同时满足以下条件才换仓：
+
+- 当日有新候选且槽位不足
+- 旧仓不在当日候选集中
+- 旧仓 `hold_score <= 7.0`
+- 新候选分数至少高出旧仓 `hold_score` 0.5
+
+这里的 `hold_score` 只评价已经持有的仓位，不直接评价新候选。新候选没有浮盈 R、持仓天数、是否触发过 1R、当前止损等路径信息，因此使用独立的 `replacement_candidate_score`：
+
+- `entry_score`：直接使用入选当天的策略分数
+- `entry_plus_rs`：入选分数加 20 日相对强度 rank overlay
+- `entry_plus_overlay`：入选分数加 ranked_v2 overlay 分数
+- `entry_plus_quality`：入选分数加相对强度、overlay 和回撤质量综合项
+
+替换比较基准可选：
+
+- `candidate_vs_hold`：新候选分数对比旧仓 `hold_score`
+- `candidate_vs_entry`：新候选分数对比旧仓原始入场分
+- `candidate_vs_blend`：新候选分数对比旧仓 `hold_score` 和入场分均值
+
+优化替换参数和总槽位：
+
+```bash
+sh scripts/liubang_live.sh optimize-replacement
+```
+
+当前样本中，最高收益组合为：
+
+```bash
+.venv/bin/python scripts/run_backtest.py \
+  --universe config/research_universe_dynamic.json \
+  --hard-stop-pct 0.03 \
+  --symbol-cooldown-days 0 \
+  --reselection-exit-mode replace_weak_hold_when_slot_needed \
+  --replacement-min-hold-score 7 \
+  --replacement-min-candidate-score-margin 0.5 \
+  --replacement-score-mode entry_plus_overlay \
+  --replacement-compare-mode candidate_vs_blend \
+  --weak-max-positions 1 \
+  --neutral-max-positions 3 \
+  --strong-max-positions 3
+```
+
+`scripts/liubang_live.sh signals/workflow/day/loop` 已默认使用这组 live 观察参数。它会影响 portfolio guard 的可用槽位，并把替换策略写入 signals 报告；实际下单和旧仓退出仍由人工决定。
+
+对比默认持有逻辑：
+
+```bash
+sh scripts/liubang_live.sh compare-reselection
+```
+
+注意：历史回测不会真实复原 yfinance 当日 dynamic screener 的成分变化；它是在指定 universe 文件内每天重新评分和筛选。要避免未来函数，历史股票池仍应使用明确保存的 universe 文件。
 
 ## 选股评分模式
 

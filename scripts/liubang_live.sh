@@ -21,6 +21,14 @@ PROFILE_ARGS=(
   --hard-stop-pct 0.03
   --symbol-cooldown-days 0
   --cooldown-journal-file data/paper_trade_journal.csv
+  --reselection-exit-mode replace_weak_hold_when_slot_needed
+  --replacement-min-hold-score 7
+  --replacement-min-candidate-score-margin 0.5
+  --replacement-score-mode entry_plus_overlay
+  --replacement-compare-mode candidate_vs_blend
+  --weak-max-positions 1
+  --neutral-max-positions 3
+  --strong-max-positions 3
 )
 
 RESEARCH_ARGS=(
@@ -56,6 +64,8 @@ Commands:
   review-open        生成并打开盘后复盘 HTML
   build-universe     重新生成扩展研究股票池
   compare-scoring    对比 classic、ranked_v1、ranked_v2 选股评分回测
+  compare-reselection 对比隔夜持仓继续持有 vs 次日不再入选则退出
+  optimize-replacement 优化弱持仓替换参数和槽位组合
   cross-scoring      搜索 5m 和 1h 同时过线的评分过滤组合
   research           重跑当前通过验证的完整研究套件
   validate           验证最新研究报告
@@ -72,6 +82,8 @@ Examples:
   scripts/liubang_live.sh dashboard-open
   scripts/liubang_live.sh review-open
   scripts/liubang_live.sh compare-scoring
+  scripts/liubang_live.sh compare-reselection
+  scripts/liubang_live.sh optimize-replacement
   scripts/liubang_live.sh cross-scoring
   scripts/liubang_live.sh positions
 
@@ -292,6 +304,12 @@ case "$command" in
     ;;
   compare-scoring)
     "$PYTHON_BIN" scripts/compare_scoring_modes.py "${RESEARCH_ARGS[@]}" "$@"
+    ;;
+  compare-reselection)
+    "$PYTHON_BIN" scripts/compare_reselection_exit.py "${RESEARCH_ARGS[@]}" "$@"
+    ;;
+  optimize-replacement)
+    "$PYTHON_BIN" scripts/optimize_replacement_logic.py "${RESEARCH_ARGS[@]}" "$@"
     ;;
   cross-scoring)
     "$PYTHON_BIN" scripts/cross_validate_scoring_strategies.py \

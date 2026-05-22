@@ -30,6 +30,34 @@ SCORING_MODE_CLASSIC = "classic"
 SCORING_MODE_RANKED_V1 = "ranked_v1"
 SCORING_MODE_RANKED_V2 = "ranked_v2"
 SCORING_MODES = (SCORING_MODE_CLASSIC, SCORING_MODE_RANKED_V1, SCORING_MODE_RANKED_V2)
+RESELECTION_EXIT_NONE = "none"
+RESELECTION_EXIT_NEXT_OPEN_NOT_RESELECTED = "next_open_not_reselected"
+RESELECTION_EXIT_NEXT_OPEN_WHEN_SLOT_NEEDED = "next_open_not_reselected_when_slot_needed"
+RESELECTION_EXIT_REPLACE_WEAK_HOLD_WHEN_SLOT_NEEDED = "replace_weak_hold_when_slot_needed"
+RESELECTION_EXIT_MODES = (
+    RESELECTION_EXIT_NONE,
+    RESELECTION_EXIT_NEXT_OPEN_NOT_RESELECTED,
+    RESELECTION_EXIT_NEXT_OPEN_WHEN_SLOT_NEEDED,
+    RESELECTION_EXIT_REPLACE_WEAK_HOLD_WHEN_SLOT_NEEDED,
+)
+REPLACEMENT_SCORE_ENTRY = "entry_score"
+REPLACEMENT_SCORE_ENTRY_PLUS_RS = "entry_plus_rs"
+REPLACEMENT_SCORE_ENTRY_PLUS_OVERLAY = "entry_plus_overlay"
+REPLACEMENT_SCORE_ENTRY_PLUS_QUALITY = "entry_plus_quality"
+REPLACEMENT_SCORE_MODES = (
+    REPLACEMENT_SCORE_ENTRY,
+    REPLACEMENT_SCORE_ENTRY_PLUS_RS,
+    REPLACEMENT_SCORE_ENTRY_PLUS_OVERLAY,
+    REPLACEMENT_SCORE_ENTRY_PLUS_QUALITY,
+)
+REPLACEMENT_COMPARE_CANDIDATE_VS_HOLD = "candidate_vs_hold"
+REPLACEMENT_COMPARE_CANDIDATE_VS_ENTRY = "candidate_vs_entry"
+REPLACEMENT_COMPARE_CANDIDATE_VS_BLEND = "candidate_vs_blend"
+REPLACEMENT_COMPARE_MODES = (
+    REPLACEMENT_COMPARE_CANDIDATE_VS_HOLD,
+    REPLACEMENT_COMPARE_CANDIDATE_VS_ENTRY,
+    REPLACEMENT_COMPARE_CANDIDATE_VS_BLEND,
+)
 DEFAULT_SCORING_MODE = SCORING_MODE_RANKED_V2
 DEFAULT_REGIME_AWARE_V2_FILTERS = True
 DEFAULT_STRONG_REGIME_MIN_RANKED_SCORE = 7.0
@@ -37,6 +65,13 @@ DEFAULT_STRONG_REGIME_MAX_PULLBACK_PCT = 0.05
 DEFAULT_STRONG_REGIME_MIN_RS20_RANK = 0.65
 DEFAULT_STRONG_REGIME_MIN_OVERLAY_SCORE = 7.4
 DEFAULT_STRONG_REGIME_MAX_ATR20_PCT = 0.08
+DEFAULT_REPLACEMENT_MIN_HOLD_SCORE = 7.0
+DEFAULT_REPLACEMENT_MIN_CANDIDATE_SCORE_MARGIN = 0.5
+DEFAULT_REPLACEMENT_SCORE_MODE = REPLACEMENT_SCORE_ENTRY
+DEFAULT_REPLACEMENT_COMPARE_MODE = REPLACEMENT_COMPARE_CANDIDATE_VS_HOLD
+DEFAULT_WEAK_MAX_POSITIONS = 1
+DEFAULT_NEUTRAL_MAX_POSITIONS = 2
+DEFAULT_STRONG_MAX_POSITIONS = 3
 
 
 @dataclass(frozen=True)
@@ -61,6 +96,14 @@ class BacktestParams:
     strong_regime_min_rs20_rank: float = DEFAULT_STRONG_REGIME_MIN_RS20_RANK
     strong_regime_min_overlay_score: float = DEFAULT_STRONG_REGIME_MIN_OVERLAY_SCORE
     strong_regime_max_atr20_pct: float = DEFAULT_STRONG_REGIME_MAX_ATR20_PCT
+    reselection_exit_mode: str = RESELECTION_EXIT_NONE
+    replacement_min_hold_score: float = DEFAULT_REPLACEMENT_MIN_HOLD_SCORE
+    replacement_min_candidate_score_margin: float = DEFAULT_REPLACEMENT_MIN_CANDIDATE_SCORE_MARGIN
+    replacement_score_mode: str = DEFAULT_REPLACEMENT_SCORE_MODE
+    replacement_compare_mode: str = DEFAULT_REPLACEMENT_COMPARE_MODE
+    weak_max_positions: int = DEFAULT_WEAK_MAX_POSITIONS
+    neutral_max_positions: int = DEFAULT_NEUTRAL_MAX_POSITIONS
+    strong_max_positions: int = DEFAULT_STRONG_MAX_POSITIONS
 
 
 @dataclass(frozen=True)
@@ -254,6 +297,24 @@ def validate_scoring_mode(scoring_mode: str) -> str:
     if scoring_mode not in SCORING_MODES:
         raise ValueError(f"Unsupported scoring_mode={scoring_mode!r}; expected one of {SCORING_MODES}")
     return scoring_mode
+
+
+def validate_reselection_exit_mode(mode: str) -> str:
+    if mode not in RESELECTION_EXIT_MODES:
+        raise ValueError(f"Unsupported reselection_exit_mode={mode!r}; expected one of {RESELECTION_EXIT_MODES}")
+    return mode
+
+
+def validate_replacement_score_mode(mode: str) -> str:
+    if mode not in REPLACEMENT_SCORE_MODES:
+        raise ValueError(f"Unsupported replacement_score_mode={mode!r}; expected one of {REPLACEMENT_SCORE_MODES}")
+    return mode
+
+
+def validate_replacement_compare_mode(mode: str) -> str:
+    if mode not in REPLACEMENT_COMPARE_MODES:
+        raise ValueError(f"Unsupported replacement_compare_mode={mode!r}; expected one of {REPLACEMENT_COMPARE_MODES}")
+    return mode
 
 
 def use_regime_aware_v2_filters(params: BacktestParams) -> bool:
@@ -781,6 +842,9 @@ def run_backtest(
     earnings_calendar: EarningsCalendar | None = None,
 ) -> dict[str, Any]:
     validate_scoring_mode(params.scoring_mode)
+    validate_reselection_exit_mode(params.reselection_exit_mode)
+    validate_replacement_score_mode(params.replacement_score_mode)
+    validate_replacement_compare_mode(params.replacement_compare_mode)
     candles_by_symbol = {
         symbol: parse_schwab_candles(history_by_symbol[symbol], regular_hours_only=True)
         for symbol in symbols
@@ -843,6 +907,10 @@ def run_backtest(
         for candidates in candidates_by_entry_date.values()
         for candidate in candidates
     ]
+    selected_symbols_by_entry_date = {
+        entry_date: {candidate.symbol for candidate in candidates}
+        for entry_date, candidates in candidates_by_entry_date.items()
+    }
 
     all_dates = sorted(
         set().union(*(set(grouped) for grouped in intraday_by_symbol.values()))
@@ -864,19 +932,101 @@ def run_backtest(
         "skipped_missing_intraday": 0,
         "candidate_count_before_regime_policy": pre_policy_candidate_count,
         "skipped_regime_policy": pre_policy_candidate_count - len(all_candidates),
+        "reselection_exit_count": 0,
+        "reselection_exit_pnl": 0.0,
+        "skipped_reselection_exit_missing_intraday": 0,
     }
     blocked_symbols_until: dict[str, date] = {}
 
     for session_date in all_dates:
         regime = regimes.get(previous_available_date(regimes, session_date), "neutral")
         open_trades = [trade for trade in open_trades if trade.remaining_shares > 0]
-
         todays_candidates = sorted(
             candidates_by_entry_date.get(session_date, []),
             key=lambda candidate: candidate.score,
             reverse=True,
         )
-        slots = max_position_count(regime) - len(open_trades)
+
+        if params.reselection_exit_mode in {
+            RESELECTION_EXIT_NEXT_OPEN_NOT_RESELECTED,
+            RESELECTION_EXIT_NEXT_OPEN_WHEN_SLOT_NEEDED,
+            RESELECTION_EXIT_REPLACE_WEAK_HOLD_WHEN_SLOT_NEEDED,
+        }:
+            still_open_after_reselection = []
+            selected_symbols = selected_symbols_by_entry_date.get(session_date, set())
+            exit_decisions = None
+            if params.reselection_exit_mode == RESELECTION_EXIT_NEXT_OPEN_WHEN_SLOT_NEEDED:
+                exit_decisions = {
+                    symbol: {"replacement_mode": params.reselection_exit_mode}
+                    for symbol in reselection_exit_symbols_for_slot_need(
+                        open_trades=open_trades,
+                        todays_candidates=todays_candidates,
+                        blocked_symbols_until=blocked_symbols_until,
+                        session_date=session_date,
+                        max_positions=max_position_count(regime, params),
+                    )
+                }
+            elif params.reselection_exit_mode == RESELECTION_EXIT_REPLACE_WEAK_HOLD_WHEN_SLOT_NEEDED:
+                hold_scores = {
+                    trade.symbol: score_hold_position(
+                        trade=trade,
+                        daily=daily_by_symbol.get(trade.symbol, []),
+                        qqq_daily=daily_by_symbol["QQQ"],
+                        session_date=session_date,
+                    )
+                    for trade in open_trades
+                }
+                exit_decisions = reselection_exit_decisions_for_weak_holds(
+                    open_trades=open_trades,
+                    todays_candidates=todays_candidates,
+                    blocked_symbols_until=blocked_symbols_until,
+                    hold_scores=hold_scores,
+                    session_date=session_date,
+                    max_positions=max_position_count(regime, params),
+                    params=params,
+                )
+            for trade in open_trades:
+                stale = session_date > trade.entry_date and trade.symbol not in selected_symbols
+                if not stale:
+                    still_open_after_reselection.append(trade)
+                    continue
+                if exit_decisions is not None and trade.symbol not in exit_decisions:
+                    still_open_after_reselection.append(trade)
+                    continue
+                day_candles = intraday_by_symbol.get(trade.symbol, {}).get(session_date, [])
+                if not day_candles:
+                    diagnostics["skipped_reselection_exit_missing_intraday"] += 1
+                    still_open_after_reselection.append(trade)
+                    continue
+                realized_before = trade.realized_pnl
+                exit_trade(trade, day_candles[0].open, session_date, "reselection_exit", params)
+                realized = trade.realized_pnl - realized_before
+                equity += realized
+                diagnostics["reselection_exit_count"] += 1
+                diagnostics["reselection_exit_pnl"] = round(
+                    float(diagnostics["reselection_exit_pnl"]) + realized,
+                    2,
+                )
+                equity_events.append({"date": session_date.isoformat(), "equity": round(equity, 2)})
+                decision = (exit_decisions or {}).get(trade.symbol) or {"replacement_mode": params.reselection_exit_mode}
+                if trade.exits:
+                    trade.exits[-1].update(
+                        {
+                            key: value
+                            for key, value in decision.items()
+                            if value is not None
+                        }
+                    )
+                update_symbol_cooldown(
+                    blocked_symbols_until,
+                    symbol=trade.symbol,
+                    trading_dates=[bar.session_date for bar in daily_by_symbol.get(trade.symbol, [])],
+                    exit_date=session_date,
+                    cooldown_days=params.symbol_cooldown_days,
+                )
+                closed_trades.append(serialize_trade(trade))
+            open_trades = still_open_after_reselection
+        slots = max_position_count(regime, params) - len(open_trades)
         if slots <= 0:
             diagnostics["skipped_no_slot"] += len(todays_candidates)
         else:
@@ -1114,6 +1264,247 @@ def exit_trade(
     exit_partial(trade, trade.remaining_shares, price, session_date, reason, params)
 
 
+def reselection_exit_symbols_for_slot_need(
+    *,
+    open_trades: list[TradeState],
+    todays_candidates: list[Candidate],
+    blocked_symbols_until: dict[str, date],
+    session_date: date,
+    max_positions: int,
+) -> set[str]:
+    open_symbols = {trade.symbol for trade in open_trades}
+    selected_symbols = {candidate.symbol for candidate in todays_candidates}
+    current_slots = max(0, max_positions - len(open_trades))
+    eligible_new_symbols = []
+    for candidate in todays_candidates:
+        if candidate.symbol in open_symbols:
+            continue
+        blocked_until = blocked_symbols_until.get(candidate.symbol)
+        if blocked_until is not None and session_date <= blocked_until:
+            continue
+        if candidate.symbol not in eligible_new_symbols:
+            eligible_new_symbols.append(candidate.symbol)
+    slots_to_free = max(0, len(eligible_new_symbols) - current_slots)
+    if slots_to_free <= 0:
+        return set()
+    stale_trades = [
+        trade
+        for trade in open_trades
+        if session_date > trade.entry_date and trade.symbol not in selected_symbols
+    ]
+    ranked_stale = sorted(stale_trades, key=lambda trade: (trade.score, trade.entry_date, trade.symbol))
+    return {trade.symbol for trade in ranked_stale[:slots_to_free]}
+
+
+def reselection_exit_decisions_for_weak_holds(
+    *,
+    open_trades: list[TradeState],
+    todays_candidates: list[Candidate],
+    blocked_symbols_until: dict[str, date],
+    hold_scores: dict[str, dict[str, Any] | None],
+    session_date: date,
+    max_positions: int,
+    params: BacktestParams,
+) -> dict[str, dict[str, Any]]:
+    open_symbols = {trade.symbol for trade in open_trades}
+    selected_symbols = {candidate.symbol for candidate in todays_candidates}
+    current_slots = max(0, max_positions - len(open_trades))
+    eligible_new_candidates = []
+    for candidate in todays_candidates:
+        if candidate.symbol in open_symbols:
+            continue
+        blocked_until = blocked_symbols_until.get(candidate.symbol)
+        if blocked_until is not None and session_date <= blocked_until:
+            continue
+        eligible_new_candidates.append(candidate)
+
+    candidates_needing_slots = eligible_new_candidates[current_slots:]
+    if not candidates_needing_slots:
+        return {}
+
+    stale_trades = [
+        trade
+        for trade in open_trades
+        if session_date > trade.entry_date and trade.symbol not in selected_symbols
+    ]
+    ranked_stale = sorted(
+        stale_trades,
+        key=lambda trade: (
+            hold_scores.get(trade.symbol, {}).get("score") if hold_scores.get(trade.symbol) else float("inf"),
+            trade.score,
+            trade.entry_date,
+            trade.symbol,
+        ),
+    )
+    decisions: dict[str, dict[str, Any]] = {}
+    for trade, candidate in zip(ranked_stale, candidates_needing_slots, strict=False):
+        hold_score = hold_scores.get(trade.symbol)
+        if not hold_score:
+            continue
+        score = as_float(hold_score.get("score"))
+        candidate_score = replacement_candidate_score(candidate, mode=params.replacement_score_mode)
+        comparison_baseline = replacement_comparison_baseline(
+            trade=trade,
+            hold_score=score,
+            mode=params.replacement_compare_mode,
+        )
+        candidate_advantage = candidate_score - comparison_baseline
+        if score > params.replacement_min_hold_score:
+            continue
+        if candidate_advantage < params.replacement_min_candidate_score_margin:
+            continue
+        decisions[trade.symbol] = {
+            "replacement_mode": params.reselection_exit_mode,
+            "hold_score": round(score, 3),
+            "hold_score_as_of_date": hold_score.get("as_of_date"),
+            "hold_score_notes": ",".join(hold_score.get("notes") or []),
+            "replacement_candidate_symbol": candidate.symbol,
+            "replacement_candidate_score": round(candidate_score, 3),
+            "replacement_candidate_entry_score": round(candidate.score, 3),
+            "replacement_score_mode": params.replacement_score_mode,
+            "replacement_compare_mode": params.replacement_compare_mode,
+            "replacement_comparison_baseline": round(comparison_baseline, 3),
+            "replacement_score_margin": round(candidate_advantage, 3),
+        }
+    return decisions
+
+
+def replacement_candidate_score(candidate: Candidate, *, mode: str) -> float:
+    mode = validate_replacement_score_mode(mode)
+    factor_data = candidate.factor_data or {}
+    score = candidate.score
+    if mode == REPLACEMENT_SCORE_ENTRY:
+        return round(clamp(score, 0.0, 10.0), 3)
+    if mode == REPLACEMENT_SCORE_ENTRY_PLUS_RS:
+        rs20_rank = safe_numeric(factor_data.get("ranked_v2_rs_20d_rank"), default=0.5) or 0.5
+        return round(clamp(score + (rs20_rank - 0.5) * 1.0, 0.0, 10.0), 3)
+    if mode == REPLACEMENT_SCORE_ENTRY_PLUS_OVERLAY:
+        overlay = safe_numeric(factor_data.get("ranked_v2_overlay_score"), default=5.0) or 5.0
+        return round(clamp(score + (overlay - 5.0) * 0.15, 0.0, 10.0), 3)
+    if mode == REPLACEMENT_SCORE_ENTRY_PLUS_QUALITY:
+        rs20_rank = safe_numeric(factor_data.get("ranked_v2_rs_20d_rank"), default=0.5) or 0.5
+        overlay = safe_numeric(factor_data.get("ranked_v2_overlay_score"), default=5.0) or 5.0
+        pullback_quality = clamp(1.0 - abs(candidate.pullback_pct - 0.03) / 0.03, 0.0, 1.0)
+        quality_bonus = (rs20_rank - 0.5) * 0.6 + (overlay - 5.0) * 0.08 + (pullback_quality - 0.5) * 0.4
+        return round(clamp(score + quality_bonus, 0.0, 10.0), 3)
+    raise ValueError(f"Unsupported replacement score mode: {mode}")
+
+
+def replacement_comparison_baseline(*, trade: TradeState, hold_score: float, mode: str) -> float:
+    mode = validate_replacement_compare_mode(mode)
+    if mode == REPLACEMENT_COMPARE_CANDIDATE_VS_HOLD:
+        return hold_score
+    if mode == REPLACEMENT_COMPARE_CANDIDATE_VS_ENTRY:
+        return trade.score
+    if mode == REPLACEMENT_COMPARE_CANDIDATE_VS_BLEND:
+        return (hold_score + trade.score) / 2.0
+    raise ValueError(f"Unsupported replacement compare mode: {mode}")
+
+
+def score_hold_position(
+    *,
+    trade: TradeState,
+    daily: list[DailyBar],
+    qqq_daily: list[DailyBar],
+    session_date: date,
+) -> dict[str, Any] | None:
+    idx = previous_daily_index(daily, session_date)
+    if idx is None or idx < 20:
+        return None
+    bar = daily[idx]
+    closes = [item.close for item in daily]
+    sma5 = rolling_mean(closes, 5)
+    sma10 = rolling_mean(closes, 10)
+    sma20 = rolling_mean(closes, 20)
+    qqq_ret5_by_date = return_by_date(qqq_daily, 5)
+    qqq_ret10_by_date = return_by_date(qqq_daily, 10)
+    symbol_ret5 = closes[idx] / closes[idx - 5] - 1.0 if idx >= 5 and closes[idx - 5] else None
+    symbol_ret10 = closes[idx] / closes[idx - 10] - 1.0 if idx >= 10 and closes[idx - 10] else None
+    qqq_ret5 = qqq_ret5_by_date.get(bar.session_date)
+    qqq_ret10 = qqq_ret10_by_date.get(bar.session_date)
+    risk_per_share = max(0.0, trade.entry_price - trade.initial_stop_price)
+    floating_r = (bar.close - trade.entry_price) / risk_per_share if risk_per_share > 0 else None
+    recent_high = max(item.high for item in daily[max(0, idx - 19) : idx + 1])
+    close_location = (
+        (bar.close - bar.low) / (bar.high - bar.low)
+        if bar.high > bar.low
+        else 0.5
+    )
+
+    score = 0.0
+    notes = []
+    if bar.close > trade.stop_price:
+        score += 1.0
+        notes.append("close_above_stop")
+    else:
+        score -= 2.0
+        notes.append("close_below_stop")
+    if bar.close > trade.entry_price:
+        score += 1.0
+        notes.append("close_above_entry")
+    if sma10[idx] is not None and bar.close > float(sma10[idx]):
+        score += 1.25
+        notes.append("close_above_sma10")
+    if sma20[idx] is not None and bar.close > float(sma20[idx]):
+        score += 1.25
+        notes.append("close_above_sma20")
+    if (
+        sma5[idx] is not None
+        and sma10[idx] is not None
+        and sma20[idx] is not None
+        and float(sma5[idx]) > float(sma10[idx]) > float(sma20[idx])
+    ):
+        score += 1.0
+        notes.append("sma_stack_positive")
+    if symbol_ret5 is not None and qqq_ret5 is not None and symbol_ret5 > qqq_ret5:
+        score += 1.0
+        notes.append("outperforming_qqq_5d")
+    if symbol_ret10 is not None and qqq_ret10 is not None and symbol_ret10 > qqq_ret10:
+        score += 1.0
+        notes.append("outperforming_qqq_10d")
+    if recent_high > 0 and bar.close / recent_high >= 0.92:
+        score += 0.75
+        notes.append("near_20d_high")
+    if close_location >= 0.55:
+        score += 0.5
+        notes.append("closed_upper_half")
+    if floating_r is not None:
+        if floating_r >= 1.0:
+            score += 1.0
+            notes.append("floating_r_at_least_1")
+        elif floating_r >= 0.5:
+            score += 0.5
+            notes.append("floating_r_at_least_0_5")
+        elif floating_r < 0.0:
+            score -= 1.0
+            notes.append("negative_floating_r")
+    if trade.target_hit:
+        score += 0.5
+        notes.append("target_1_hit")
+
+    return {
+        "score": round(clamp(score, 0.0, 10.0), 3),
+        "as_of_date": bar.session_date.isoformat(),
+        "close": round(bar.close, 4),
+        "floating_r": round(floating_r, 3) if floating_r is not None else None,
+        "notes": notes,
+    }
+
+
+def previous_daily_index(daily: list[DailyBar], session_date: date) -> int | None:
+    for idx in range(len(daily) - 1, -1, -1):
+        if daily[idx].session_date < session_date:
+            return idx
+    return None
+
+
+def as_float(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def max_hold_date(daily: list[DailyBar], entry_date: date, max_hold_days: int) -> date:
     dates = [bar.session_date for bar in daily]
     if entry_date not in dates:
@@ -1336,7 +1727,13 @@ def previous_available_date(regimes: dict[date, str], session_date: date) -> dat
     return max(available) if available else None
 
 
-def max_position_count(regime: str) -> int:
+def max_position_count(regime: str, params: BacktestParams | None = None) -> int:
+    if params is not None:
+        if regime == "strong":
+            return max(0, int(params.strong_max_positions))
+        if regime == "weak":
+            return max(0, int(params.weak_max_positions))
+        return max(0, int(params.neutral_max_positions))
     if regime == "strong":
         return 3
     if regime == "weak":
@@ -1384,6 +1781,7 @@ def format_backtest_summary(report: dict[str, Any], report_path: Path) -> str:
         "Backtest summary",
         f"Symbols: {', '.join(report['config']['symbols'])}",
         f"Scoring mode: {report['config']['params'].get('scoring_mode')}",
+        f"Reselection exit: {report['config']['params'].get('reselection_exit_mode')}",
         f"Candidates: {report['candidate_count']}",
         f"Trades: {summary['trade_count']}",
         f"Entry attempts: {diagnostics.get('entry_attempts')} filled={diagnostics.get('filled_entries')} unfilled={diagnostics.get('unfilled_entries')}",
@@ -1401,6 +1799,8 @@ def format_backtest_summary(report: dict[str, Any], report_path: Path) -> str:
     skipped_regime_policy = diagnostics.get("skipped_regime_policy")
     if skipped_regime_policy:
         lines.insert(6, f"Regime policy skipped: {skipped_regime_policy}")
+    if diagnostics.get("reselection_exit_count"):
+        lines.insert(7, f"Reselection exits: {diagnostics.get('reselection_exit_count')} pnl={diagnostics.get('reselection_exit_pnl')}")
     history_sources = report.get("history_sources") or {}
     if history_sources:
         lines.insert(-1, f"History sources: {format_history_sources(history_sources)}")

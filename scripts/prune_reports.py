@@ -27,6 +27,8 @@ REPORT_PREFIXES = (
     "strategy_validation_",
     "research_suite_",
     "schwab_probe_",
+    "reselection_exit_compare_",
+    "replacement_logic_optimization_",
 )
 
 

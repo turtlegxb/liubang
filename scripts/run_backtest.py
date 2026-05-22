@@ -14,6 +14,9 @@ if str(SRC_ROOT) not in sys.path:
 
 from liubang.backtest import (
     BacktestParams,
+    REPLACEMENT_COMPARE_MODES,
+    REPLACEMENT_SCORE_MODES,
+    RESELECTION_EXIT_MODES,
     SCORING_MODES,
     format_backtest_summary,
     run_backtest,
@@ -63,6 +66,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--risk-per-trade-pct", type=float, default=DEFAULT_RISK_PER_TRADE_PCT)
     parser.add_argument("--max-position-pct", type=float, default=DEFAULT_MAX_POSITION_PCT)
     parser.add_argument("--symbol-cooldown-days", type=int, default=0)
+    parser.add_argument("--reselection-exit-mode", choices=RESELECTION_EXIT_MODES, default=BacktestParams().reselection_exit_mode)
+    parser.add_argument("--replacement-min-hold-score", type=float, default=BacktestParams().replacement_min_hold_score)
+    parser.add_argument(
+        "--replacement-min-candidate-score-margin",
+        type=float,
+        default=BacktestParams().replacement_min_candidate_score_margin,
+    )
+    parser.add_argument("--replacement-score-mode", choices=REPLACEMENT_SCORE_MODES, default=BacktestParams().replacement_score_mode)
+    parser.add_argument("--replacement-compare-mode", choices=REPLACEMENT_COMPARE_MODES, default=BacktestParams().replacement_compare_mode)
+    parser.add_argument("--weak-max-positions", type=int, default=BacktestParams().weak_max_positions)
+    parser.add_argument("--neutral-max-positions", type=int, default=BacktestParams().neutral_max_positions)
+    parser.add_argument("--strong-max-positions", type=int, default=BacktestParams().strong_max_positions)
     return parser
 
 
@@ -95,6 +110,14 @@ def main() -> int:
             risk_per_trade_pct=args.risk_per_trade_pct,
             max_position_pct=args.max_position_pct,
             symbol_cooldown_days=max(0, args.symbol_cooldown_days),
+            reselection_exit_mode=args.reselection_exit_mode,
+            replacement_min_hold_score=args.replacement_min_hold_score,
+            replacement_min_candidate_score_margin=args.replacement_min_candidate_score_margin,
+            replacement_score_mode=args.replacement_score_mode,
+            replacement_compare_mode=args.replacement_compare_mode,
+            weak_max_positions=max(0, args.weak_max_positions),
+            neutral_max_positions=max(0, args.neutral_max_positions),
+            strong_max_positions=max(0, args.strong_max_positions),
         )
         earnings_calendar = load_earnings_for_symbols(
             symbols=symbols,

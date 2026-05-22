@@ -6,6 +6,7 @@ import os
 import json
 import shutil
 from argparse import Namespace
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -24,9 +25,19 @@ from liubang.dynamic_universe import select_dynamic_universe
 from liubang.backtest import (
     BacktestParams,
     Candidate,
+    DailyBar,
+    REPLACEMENT_COMPARE_CANDIDATE_VS_BLEND,
+    REPLACEMENT_SCORE_ENTRY_PLUS_RS,
+    RESELECTION_EXIT_NEXT_OPEN_NOT_RESELECTED,
+    RESELECTION_EXIT_NEXT_OPEN_WHEN_SLOT_NEEDED,
+    RESELECTION_EXIT_REPLACE_WEAK_HOLD_WHEN_SLOT_NEEDED,
     apply_candidate_scoring_mode,
     filter_candidates_for_regime_policy,
     filter_watchlist_for_regime_policy,
+    reselection_exit_symbols_for_slot_need,
+    reselection_exit_decisions_for_weak_holds,
+    score_hold_position,
+    replacement_candidate_score,
     summarize_trades,
     symbol_cooldown_end_date,
     write_backtest_trades_csv,
@@ -63,6 +74,7 @@ from scripts.run_workflow import (
 from scripts.analyze_backtest import format_analysis
 from scripts.ablate_themes import group_symbols_by_theme
 from scripts.build_research_universe import build_research_universe_payload
+from scripts.compare_reselection_exit import build_row as build_reselection_compare_row, parse_modes as parse_reselection_modes
 from scripts.export_watchlist_csv import build_rows as build_watchlist_rows
 from scripts.export_trigger_templates import build_templates_payload
 from scripts.generate_signals import apply_symbol_cooldown, weekday_cooldown_end
@@ -106,6 +118,11 @@ def main() -> int:
     test_dynamic_universe_selection()
     test_trade_plan_sizing()
     test_portfolio_guard()
+    test_reselection_exit_compare_row()
+    test_reselection_exit_slot_need()
+    test_hold_score_replacement_requires_weak_hold()
+    test_hold_score_rewards_trend_extension()
+    test_replacement_candidate_score_modes()
     test_context_risk_flags()
     test_journal_summary()
     test_risk_throttle_blocks_loss_cluster()
@@ -199,6 +216,14 @@ def test_default_parameters() -> None:
     assert params.regime_aware_v2_filters is True
     assert params.strong_regime_min_rs20_rank == 0.65
     assert params.strong_regime_min_overlay_score == 7.4
+    assert params.reselection_exit_mode == "none"
+    assert params.replacement_min_hold_score == 7.0
+    assert params.replacement_min_candidate_score_margin == 0.5
+    assert params.replacement_score_mode == "entry_score"
+    assert params.replacement_compare_mode == "candidate_vs_hold"
+    assert params.weak_max_positions == 1
+    assert params.neutral_max_positions == 2
+    assert params.strong_max_positions == 3
     assert sizing.hard_stop_pct == DEFAULT_HARD_STOP_PCT
 
 
@@ -1050,6 +1075,16 @@ def test_portfolio_guard() -> None:
     assert guard["available_exposure_value"] == 39000.0
     assert guard["allow_new_entries"]
 
+    expanded = build_portfolio_guard(
+        market_regime="neutral",
+        open_positions=(position,),
+        positions_path=None,
+        neutral_max_positions=3,
+    )
+    assert expanded["max_positions"] == 3
+    assert expanded["available_slots"] == 2
+    assert "neutral=3" in expanded["rule"]
+
     oversized = ManualPosition(
         symbol="MSFT",
         entry_date=date(2026, 5, 20),
@@ -1069,6 +1104,235 @@ def test_portfolio_guard() -> None:
     assert blocked["available_exposure_value"] == 0.0
     assert not blocked["exposure_allows_new_entries"]
     assert not blocked["allow_new_entries"]
+
+
+def test_reselection_exit_compare_row() -> None:
+    assert parse_reselection_modes(
+        "none,next_open_not_reselected,next_open_not_reselected_when_slot_needed,replace_weak_hold_when_slot_needed"
+    ) == (
+        "none",
+        RESELECTION_EXIT_NEXT_OPEN_NOT_RESELECTED,
+        RESELECTION_EXIT_NEXT_OPEN_WHEN_SLOT_NEEDED,
+        RESELECTION_EXIT_REPLACE_WEAK_HOLD_WHEN_SLOT_NEEDED,
+    )
+    row = build_reselection_compare_row(
+        RESELECTION_EXIT_NEXT_OPEN_NOT_RESELECTED,
+        {
+            "candidate_count": 3,
+            "diagnostics": {
+                "entry_attempts": 2,
+                "filled_entries": 1,
+                "skipped_no_slot": 0,
+                "reselection_exit_count": 1,
+                "reselection_exit_pnl": 12.5,
+            },
+            "summary": {
+                "trade_count": 1,
+                "win_rate": 1.0,
+                "return_pct": 0.1,
+                "total_pnl": 100.0,
+                "average_r": 0.5,
+                "average_holding_weekdays": 2.0,
+                "profit_factor": float("inf"),
+                "max_drawdown_pct": 0.0,
+                "by_exit_reason": {
+                    "reselection_exit": {
+                        "trades": 1,
+                        "pnl": 12.5,
+                        "win_rate": 1.0,
+                        "average_r": 0.2,
+                    }
+                },
+            },
+            "trades": [
+                {
+                    "exits": [
+                        {
+                            "reason": "reselection_exit",
+                            "hold_score": 5.5,
+                            "replacement_candidate_score": 8.0,
+                        }
+                    ]
+                }
+            ],
+        },
+    )
+    assert row["reselection_exit_mode"] == RESELECTION_EXIT_NEXT_OPEN_NOT_RESELECTED
+    assert row["reselection_exit_count"] == 1
+    assert row["reselection_exit_average_r"] == 0.2
+    assert row["reselection_exit_average_hold_score"] == 5.5
+    assert row["reselection_exit_average_replacement_score"] == 8.0
+
+
+def test_reselection_exit_slot_need() -> None:
+    open_trades = [
+        sample_trade("OLD_LOW", score=7.0),
+        sample_trade("OLD_HIGH", score=9.0),
+    ]
+    candidates = [
+        sample_candidate("NEW_A"),
+        sample_candidate("NEW_B"),
+    ]
+    assert reselection_exit_symbols_for_slot_need(
+        open_trades=open_trades,
+        todays_candidates=candidates,
+        blocked_symbols_until={},
+        session_date=date(2026, 5, 21),
+        max_positions=2,
+    ) == {"OLD_LOW", "OLD_HIGH"}
+    assert reselection_exit_symbols_for_slot_need(
+        open_trades=open_trades[:1],
+        todays_candidates=[sample_candidate("NEW_A")],
+        blocked_symbols_until={},
+        session_date=date(2026, 5, 21),
+        max_positions=2,
+    ) == set()
+    assert reselection_exit_symbols_for_slot_need(
+        open_trades=open_trades,
+        todays_candidates=[sample_candidate("OLD_LOW"), sample_candidate("NEW_A")],
+        blocked_symbols_until={},
+        session_date=date(2026, 5, 21),
+        max_positions=2,
+    ) == {"OLD_HIGH"}
+
+
+def test_hold_score_replacement_requires_weak_hold() -> None:
+    session_date = date(2026, 5, 26)
+    weak_trade = sample_trade("WEAK", score=7.0)
+    strong_trade = sample_trade("STRONG", score=7.0)
+    candidates = [sample_candidate("NEW_A")]
+    params = BacktestParams(reselection_exit_mode=RESELECTION_EXIT_REPLACE_WEAK_HOLD_WHEN_SLOT_NEEDED)
+    decisions = reselection_exit_decisions_for_weak_holds(
+        open_trades=[weak_trade],
+        todays_candidates=candidates,
+        blocked_symbols_until={},
+        hold_scores={
+            "WEAK": {
+                "score": 5.0,
+                "as_of_date": "2026-05-25",
+                "notes": ["negative_floating_r"],
+            }
+        },
+        session_date=session_date,
+        max_positions=1,
+        params=params,
+    )
+    assert decisions["WEAK"]["replacement_candidate_symbol"] == "NEW_A"
+    assert decisions["WEAK"]["replacement_score_margin"] == 3.0
+
+    no_decisions = reselection_exit_decisions_for_weak_holds(
+        open_trades=[strong_trade],
+        todays_candidates=candidates,
+        blocked_symbols_until={},
+        hold_scores={
+            "STRONG": {
+                "score": 7.5,
+                "as_of_date": "2026-05-25",
+                "notes": ["close_above_sma20"],
+            }
+        },
+        session_date=session_date,
+        max_positions=1,
+        params=params,
+    )
+    assert no_decisions == {}
+
+
+def test_hold_score_rewards_trend_extension() -> None:
+    session_date = date(2026, 5, 26)
+    daily = sample_daily_series(start=date(2026, 4, 20), start_close=90.0, step=1.0)
+    qqq_daily = sample_daily_series(start=date(2026, 4, 20), start_close=90.0, step=0.2)
+    trade = sample_trade("TREND", score=7.0)
+    score = score_hold_position(
+        trade=trade,
+        daily=daily,
+        qqq_daily=qqq_daily,
+        session_date=session_date,
+    )
+    assert score is not None
+    assert score["score"] >= 8.0
+    assert "outperforming_qqq_10d" in score["notes"]
+
+
+def test_replacement_candidate_score_modes() -> None:
+    candidate = sample_candidate("NEW_A")
+    candidate = replace(
+        candidate,
+        score=8.0,
+        factor_data={
+            "ranked_v2_rs_20d_rank": 1.0,
+            "ranked_v2_overlay_score": 8.0,
+        },
+    )
+    assert replacement_candidate_score(candidate, mode=REPLACEMENT_SCORE_ENTRY_PLUS_RS) == 8.5
+    decisions = reselection_exit_decisions_for_weak_holds(
+        open_trades=[sample_trade("OLD", score=8.0)],
+        todays_candidates=[candidate],
+        blocked_symbols_until={},
+        hold_scores={"OLD": {"score": 6.0, "as_of_date": "2026-05-25", "notes": []}},
+        session_date=date(2026, 5, 21),
+        max_positions=1,
+        params=BacktestParams(
+            replacement_score_mode=REPLACEMENT_SCORE_ENTRY_PLUS_RS,
+            replacement_compare_mode=REPLACEMENT_COMPARE_CANDIDATE_VS_BLEND,
+        ),
+    )
+    assert decisions["OLD"]["replacement_candidate_score"] == 8.5
+    assert decisions["OLD"]["replacement_comparison_baseline"] == 7.0
+
+
+def sample_trade(symbol: str, *, score: float) -> Any:
+    from liubang.backtest import TradeState
+
+    return TradeState(
+        symbol=symbol,
+        regime="neutral",
+        signal_date=date(2026, 5, 19),
+        entry_date=date(2026, 5, 20),
+        entry_dt=datetime(2026, 5, 20, 14, 0, tzinfo=UTC),
+        entry_price=100.0,
+        initial_stop_price=97.0,
+        stop_price=97.0,
+        target_price=103.0,
+        shares=10,
+        remaining_shares=10,
+        score=score,
+        target_hit=False,
+        realized_pnl=0.0,
+        exits=[],
+        max_exit_date=date(2026, 5, 24),
+    )
+
+
+def sample_candidate(symbol: str) -> Candidate:
+    return Candidate(
+        symbol=symbol,
+        signal_date=date(2026, 5, 20),
+        entry_date=date(2026, 5, 21),
+        score=8.0,
+        strength_score=4.0,
+        pullback_score=4.0,
+        pullback_pct=0.03,
+        prev_close=100.0,
+        technical_stop=97.0,
+        regime="neutral",
+        notes=[],
+    )
+
+
+def sample_daily_series(*, start: date, start_close: float, step: float, count: int = 30) -> list[DailyBar]:
+    return [
+        DailyBar(
+            session_date=date.fromordinal(start.toordinal() + idx),
+            open=round(start_close + step * idx - 0.2, 4),
+            high=round(start_close + step * idx + 0.5, 4),
+            low=round(start_close + step * idx - 0.5, 4),
+            close=round(start_close + step * idx, 4),
+            volume=1_000_000.0,
+            candle_count=78,
+        )
+        for idx in range(count)
+    ]
 
 
 def test_context_risk_flags() -> None:
@@ -1259,6 +1523,14 @@ def test_workflow_signal_strategy_command() -> None:
             scoring_mode=None,
             symbol_cooldown_days=3,
             cooldown_journal_file="data/paper_trade_journal.csv",
+            reselection_exit_mode="replace_weak_hold_when_slot_needed",
+            replacement_min_hold_score=7.0,
+            replacement_min_candidate_score_margin=0.5,
+            replacement_score_mode="entry_plus_overlay",
+            replacement_compare_mode="candidate_vs_blend",
+            weak_max_positions=1,
+            neutral_max_positions=3,
+            strong_max_positions=3,
             account_equity=None,
             risk_per_trade_pct=None,
             max_position_pct=None,
@@ -1271,6 +1543,8 @@ def test_workflow_signal_strategy_command() -> None:
     assert "--dynamic-source" in command
     assert "--symbol-cooldown-days" in command
     assert "--cooldown-journal-file" in command
+    assert "--replacement-score-mode" in command
+    assert "--neutral-max-positions" in command
     assert "--hard-stop-pct" in command
 
 

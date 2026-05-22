@@ -105,10 +105,30 @@
       "theme": "ai_infrastructure"
     },
     {
-      "rank_score": 18.2229,
+      "rank_score": 18.0,
+      "screeners": [
+        "day_gainers"
+      ],
+      "short_name": "Sandisk Corporation",
+      "source": "yfinance_screener",
+      "symbol": "SNDK",
+      "theme": "dynamic_yfinance"
+    },
+    {
+      "rank_score": 15.9537,
       "screeners": [
         "most_actives",
         "day_gainers"
+      ],
+      "short_name": "International Business Machines",
+      "source": "yfinance_screener",
+      "symbol": "IBM",
+      "theme": "dynamic_yfinance"
+    },
+    {
+      "rank_score": 15.9227,
+      "screeners": [
+        "most_actives"
       ],
       "short_name": "Intel Corporation",
       "source": "yfinance_screener",
@@ -116,17 +136,49 @@
       "theme": "dynamic_yfinance"
     },
     {
-      "rank_score": 14.6469,
+      "rank_score": 15.7857,
       "screeners": [
-        "most_actives"
+        "most_actives",
+        "day_gainers"
       ],
-      "short_name": "Marvell Technology, Inc.",
+      "short_name": "Nebius Group N.V.",
       "source": "yfinance_screener",
-      "symbol": "MRVL",
+      "symbol": "NBIS",
       "theme": "dynamic_yfinance"
     },
     {
-      "rank_score": 13.0685,
+      "rank_score": 15.6467,
+      "screeners": [
+        "most_actives",
+        "day_gainers"
+      ],
+      "short_name": "QUALCOMM Incorporated",
+      "source": "yfinance_screener",
+      "symbol": "QCOM",
+      "theme": "dynamic_yfinance"
+    },
+    {
+      "rank_score": 15.4378,
+      "screeners": [
+        "day_gainers"
+      ],
+      "short_name": "Lumentum Holdings Inc.",
+      "source": "yfinance_screener",
+      "symbol": "LITE",
+      "theme": "dynamic_yfinance"
+    },
+    {
+      "rank_score": 13.8878,
+      "screeners": [
+        "day_gainers"
+      ],
+      "short_name": "Bloom Energy Corporation",
+      "source": "yfinance_screener",
+      "symbol": "BE",
+      "theme": "dynamic_yfinance"
+    },
+    {
+      "rank_score": 13.6283,
       "screeners": [
         "most_actives",
         "day_gainers"
@@ -137,118 +189,7 @@
       "theme": "dynamic_yfinance"
     },
     {
-      "rank_score": 12.4958,
-      "screeners": [
-        "most_actives"
-      ],
-      "short_name": "QUALCOMM Incorporated",
-      "source": "yfinance_screener",
-      "symbol": "QCOM",
-      "theme": "dynamic_yfinance"
-    },
-    {
-      "rank_score": 12.3335,
-      "screeners": [
-        "day_gainers"
-      ],
-      "short_name": "Bloom Energy Corporation",
-      "source": "yfinance_screener",
-      "symbol": "BE",
-      "theme": "dynamic_yfinance"
-    },
-    {
-      "rank_score": 12.0801,
-      "screeners": [
-        "most_actives"
-      ],
-      "short_name": "Rocket Lab Corporation",
-      "source": "yfinance_screener",
-      "symbol": "RKLB",
-      "theme": "dynamic_yfinance"
-    },
-    {
-      "rank_score": 11.8655,
-      "screeners": [
-        "day_gainers"
-      ],
-      "short_name": "Lam Research Corporation",
-      "source": "yfinance_screener",
-      "symbol": "LRCX",
-      "theme": "dynamic_yfinance"
-    },
-    {
-      "rank_score": 11.8497,
-      "screeners": [
-        "day_gainers",
-        "growth_technology_stocks"
-      ],
-      "short_name": "Astera Labs, Inc.",
-      "source": "yfinance_screener",
-      "symbol": "ALAB",
-      "theme": "dynamic_yfinance"
-    },
-    {
-      "rank_score": 11.143,
-      "screeners": [
-        "most_actives"
-      ],
-      "short_name": "Walmart Inc.",
-      "source": "yfinance_screener",
-      "symbol": "WMT",
-      "theme": "dynamic_yfinance"
-    },
-    {
-      "rank_score": 10.601,
-      "screeners": [
-        "growth_technology_stocks"
-      ],
-      "short_name": "Western Digital Corporation",
-      "source": "yfinance_screener",
-      "symbol": "WDC",
-      "theme": "dynamic_yfinance"
-    },
-    {
-      "rank_score": 10.5573,
-      "screeners": [
-        "most_actives"
-      ],
-      "short_name": "Cisco Systems, Inc.",
-      "source": "yfinance_screener",
-      "symbol": "CSCO",
-      "theme": "dynamic_yfinance"
-    },
-    {
-      "rank_score": 10.2804,
-      "screeners": [
-        "most_actives"
-      ],
-      "short_name": "CoreWeave, Inc.",
-      "source": "yfinance_screener",
-      "symbol": "CRWV",
-      "theme": "dynamic_yfinance"
-    },
-    {
-      "rank_score": 10.0925,
-      "screeners": [
-        "growth_technology_stocks"
-      ],
-      "short_name": "Seagate Technology Holdings PLC",
-      "source": "yfinance_screener",
-      "symbol": "STX",
-      "theme": "dynamic_yfinance"
-    },
-    {
-      "rank_score": 9.3325,
-      "screeners": [
-        "most_actives"
-      ],
-      "short_name": "AST SpaceMobile, Inc.",
-      "source": "yfinance_screener",
-      "symbol": "ASTS",
-      "theme": "dynamic_yfinance"
-    },
-    {
-      "rank_score": 9.3259,
+      "rank_score": 13.4004,
       "screeners": [
         "most_actives",
         "day_gainers"
@@ -259,7 +200,194 @@
       "theme": "dynamic_yfinance"
     },
     {
-      "rank_score": 8.42,
+      "rank_score": 13.3326,
+      "screeners": [
+        "most_actives",
+        "day_gainers"
+      ],
+      "short_name": "CoreWeave, Inc.",
+      "source": "yfinance_screener",
+      "symbol": "CRWV",
+      "theme": "dynamic_yfinance"
+    },
+    {
+      "rank_score": 13.1041,
+      "screeners": [
+        "day_gainers",
+        "growth_technology_stocks"
+      ],
+      "short_name": "Seagate Technology Holdings PLC",
+      "source": "yfinance_screener",
+      "symbol": "STX",
+      "theme": "dynamic_yfinance"
+    },
+    {
+      "rank_score": 12.9518,
+      "screeners": [
+        "most_actives"
+      ],
+      "short_name": "Walmart Inc.",
+      "source": "yfinance_screener",
+      "symbol": "WMT",
+      "theme": "dynamic_yfinance"
+    },
+    {
+      "rank_score": 12.593,
+      "screeners": [
+        "most_actives",
+        "day_gainers"
+      ],
+      "short_name": "AST SpaceMobile, Inc.",
+      "source": "yfinance_screener",
+      "symbol": "ASTS",
+      "theme": "dynamic_yfinance"
+    },
+    {
+      "rank_score": 12.478,
+      "screeners": [
+        "most_actives"
+      ],
+      "short_name": "Marvell Technology, Inc.",
+      "source": "yfinance_screener",
+      "symbol": "MRVL",
+      "theme": "dynamic_yfinance"
+    },
+    {
+      "rank_score": 12.1998,
+      "screeners": [
+        "day_gainers",
+        "growth_technology_stocks"
+      ],
+      "short_name": "Western Digital Corporation",
+      "source": "yfinance_screener",
+      "symbol": "WDC",
+      "theme": "dynamic_yfinance"
+    },
+    {
+      "rank_score": 11.3465,
+      "screeners": [
+        "most_actives"
+      ],
+      "short_name": "Cisco Systems, Inc.",
+      "source": "yfinance_screener",
+      "symbol": "CSCO",
+      "theme": "dynamic_yfinance"
+    },
+    {
+      "rank_score": 11.1848,
+      "screeners": [
+        "day_gainers"
+      ],
+      "short_name": "Corning Incorporated",
+      "source": "yfinance_screener",
+      "symbol": "GLW",
+      "theme": "dynamic_yfinance"
+    },
+    {
+      "rank_score": 11.0702,
+      "screeners": [
+        "day_gainers"
+      ],
+      "short_name": "Applied Optoelectronics, Inc.",
+      "source": "yfinance_screener",
+      "symbol": "AAOI",
+      "theme": "dynamic_yfinance"
+    },
+    {
+      "rank_score": 10.5797,
+      "screeners": [
+        "day_gainers"
+      ],
+      "short_name": "Coherent Corp.",
+      "source": "yfinance_screener",
+      "symbol": "COHR",
+      "theme": "dynamic_yfinance"
+    },
+    {
+      "rank_score": 10.5237,
+      "screeners": [
+        "most_actives"
+      ],
+      "short_name": "Rocket Lab Corporation",
+      "source": "yfinance_screener",
+      "symbol": "RKLB",
+      "theme": "dynamic_yfinance"
+    },
+    {
+      "rank_score": 10.0821,
+      "screeners": [
+        "most_actives"
+      ],
+      "short_name": "Intuit Inc.",
+      "source": "yfinance_screener",
+      "symbol": "INTU",
+      "theme": "dynamic_yfinance"
+    },
+    {
+      "rank_score": 9.4034,
+      "screeners": [
+        "day_gainers"
+      ],
+      "short_name": "Spotify Technology S.A.",
+      "source": "yfinance_screener",
+      "symbol": "SPOT",
+      "theme": "dynamic_yfinance"
+    },
+    {
+      "rank_score": 9.3627,
+      "screeners": [
+        "day_gainers"
+      ],
+      "short_name": "Arista Networks, Inc.",
+      "source": "yfinance_screener",
+      "symbol": "ANET",
+      "theme": "dynamic_yfinance"
+    },
+    {
+      "rank_score": 9.2687,
+      "screeners": [
+        "growth_technology_stocks"
+      ],
+      "short_name": "Astera Labs, Inc.",
+      "source": "yfinance_screener",
+      "symbol": "ALAB",
+      "theme": "dynamic_yfinance"
+    },
+    {
+      "rank_score": 9.0196,
+      "screeners": [
+        "most_actives",
+        "day_gainers"
+      ],
+      "short_name": "Rigetti Computing, Inc.",
+      "source": "yfinance_screener",
+      "symbol": "RGTI",
+      "theme": "dynamic_yfinance"
+    },
+    {
+      "rank_score": 8.8321,
+      "screeners": [
+        "most_actives",
+        "day_gainers"
+      ],
+      "short_name": "D-Wave Quantum Inc.",
+      "source": "yfinance_screener",
+      "symbol": "QBTS",
+      "theme": "dynamic_yfinance"
+    },
+    {
+      "rank_score": 8.3605,
+      "screeners": [
+        "most_actives",
+        "day_gainers"
+      ],
+      "short_name": "Applied Digital Corporation",
+      "source": "yfinance_screener",
+      "symbol": "APLD",
+      "theme": "dynamic_yfinance"
+    },
+    {
+      "rank_score": 7.8518,
       "screeners": [
         "most_actives"
       ],
@@ -269,28 +397,17 @@
       "theme": "dynamic_yfinance"
     },
     {
-      "rank_score": 7.9645,
+      "rank_score": 7.6137,
       "screeners": [
-        "day_gainers",
         "growth_technology_stocks"
       ],
-      "short_name": "Teradyne, Inc.",
+      "short_name": "Dell Technologies Inc.",
       "source": "yfinance_screener",
-      "symbol": "TER",
+      "symbol": "DELL",
       "theme": "dynamic_yfinance"
     },
     {
-      "rank_score": 7.8133,
-      "screeners": [
-        "most_actives"
-      ],
-      "short_name": "Akamai Technologies, Inc.",
-      "source": "yfinance_screener",
-      "symbol": "AKAM",
-      "theme": "dynamic_yfinance"
-    },
-    {
-      "rank_score": 7.7596,
+      "rank_score": 7.5355,
       "screeners": [
         "day_gainers",
         "growth_technology_stocks"
@@ -299,115 +416,13 @@
       "source": "yfinance_screener",
       "symbol": "CRDO",
       "theme": "dynamic_yfinance"
-    },
-    {
-      "rank_score": 6.5591,
-      "screeners": [
-        "day_gainers"
-      ],
-      "short_name": "Constellation Energy Corporatio",
-      "source": "yfinance_screener",
-      "symbol": "CEG",
-      "theme": "dynamic_yfinance"
-    },
-    {
-      "rank_score": 6.4046,
-      "screeners": [
-        "most_actives",
-        "day_gainers"
-      ],
-      "short_name": "Carnival Corporation Ltd.",
-      "source": "yfinance_screener",
-      "symbol": "CCL",
-      "theme": "dynamic_yfinance"
-    },
-    {
-      "rank_score": 6.0506,
-      "screeners": [
-        "most_actives"
-      ],
-      "short_name": "Nokia Corporation Sponsored",
-      "source": "yfinance_screener",
-      "symbol": "NOK",
-      "theme": "dynamic_yfinance"
-    },
-    {
-      "rank_score": 5.8459,
-      "screeners": [
-        "most_actives",
-        "day_gainers"
-      ],
-      "short_name": "American Airlines Group, Inc.",
-      "source": "yfinance_screener",
-      "symbol": "AAL",
-      "theme": "dynamic_yfinance"
-    },
-    {
-      "rank_score": 5.6308,
-      "screeners": [
-        "day_gainers"
-      ],
-      "short_name": "Vistra Corp.",
-      "source": "yfinance_screener",
-      "symbol": "VST",
-      "theme": "dynamic_yfinance"
-    },
-    {
-      "rank_score": 5.3971,
-      "screeners": [
-        "growth_technology_stocks"
-      ],
-      "short_name": "Ciena Corporation",
-      "source": "yfinance_screener",
-      "symbol": "CIEN",
-      "theme": "dynamic_yfinance"
-    },
-    {
-      "rank_score": 5.2082,
-      "screeners": [
-        "most_actives"
-      ],
-      "short_name": "Nike, Inc.",
-      "source": "yfinance_screener",
-      "symbol": "NKE",
-      "theme": "dynamic_yfinance"
-    },
-    {
-      "rank_score": 4.5888,
-      "screeners": [
-        "most_actives"
-      ],
-      "short_name": "Target Corporation",
-      "source": "yfinance_screener",
-      "symbol": "TGT",
-      "theme": "dynamic_yfinance"
-    },
-    {
-      "rank_score": 4.1243,
-      "screeners": [
-        "most_actives"
-      ],
-      "short_name": "AT&T Inc.",
-      "source": "yfinance_screener",
-      "symbol": "T",
-      "theme": "dynamic_yfinance"
-    },
-    {
-      "rank_score": 2.7045,
-      "screeners": [
-        "most_actives"
-      ],
-      "short_name": "Apellis Pharmaceuticals, Inc.",
-      "source": "yfinance_screener",
-      "symbol": "APLS",
-      "theme": "dynamic_yfinance"
     }
   ],
   "description": "Expanded research universe generated from the fixed core universe plus high-liquidity yfinance screener additions. This is not a buy list.",
   "generation": {
     "base_count": 25,
     "base_name": "liubang_core_v1",
-    "dynamic_count": 29,
+    "dynamic_count": 30,
     "dynamic_summary": {
       "cache_path": "data/cache/dynamic_universe_yfinance.json",
       "errors": {},
@@ -442,7 +457,7 @@
         "TSM",
         "XLK"
       ],
-      "fetched_at": "2026-05-21T08:20:34.023507+00:00",
+      "fetched_at": "2026-05-22T02:25:31.510980+00:00",
       "filters": {
         "average_volume_proxy": "averageDailyVolume10Day, falling back to 3-month or generic average volume",
         "limit": 30,
@@ -451,45 +466,46 @@
         "min_market_cap": 2000000000.0,
         "min_price": 5.0
       },
-      "raw_quote_count": 215,
+      "raw_quote_count": 210,
       "screeners": [
         "most_actives",
         "day_gainers",
         "growth_technology_stocks"
       ],
-      "selected_count": 29,
+      "selected_count": 30,
       "source": "yfinance.screen",
       "stale_due_to_fetch_error": null,
       "symbols": [
+        "SNDK",
+        "IBM",
         "INTC",
-        "MRVL",
-        "IREN",
+        "NBIS",
         "QCOM",
+        "LITE",
         "BE",
-        "RKLB",
-        "LRCX",
-        "ALAB",
-        "WMT",
-        "WDC",
-        "CSCO",
+        "IREN",
+        "IONQ",
         "CRWV",
         "STX",
+        "WMT",
         "ASTS",
-        "IONQ",
+        "MRVL",
+        "WDC",
+        "CSCO",
+        "GLW",
+        "AAOI",
+        "COHR",
+        "RKLB",
+        "INTU",
+        "SPOT",
+        "ANET",
+        "ALAB",
+        "RGTI",
+        "QBTS",
+        "APLD",
         "BAC",
-        "TER",
-        "AKAM",
-        "CRDO",
-        "CEG",
-        "CCL",
-        "NOK",
-        "AAL",
-        "VST",
-        "CIEN",
-        "NKE",
-        "TGT",
-        "T",
-        "APLS"
+        "DELL",
+        "CRDO"
       ]
     },
     "extra_count": 0
@@ -499,5 +515,5 @@
     "XLK",
     "SMH"
   ],
-  "updated_at": "2026-05-21"
+  "updated_at": "2026-05-22"
 }

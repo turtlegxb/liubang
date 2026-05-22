@@ -65,7 +65,15 @@ scripts/liubang_live.sh positions
 - `--hard-stop-pct 0.03`
 - `--symbol-cooldown-days 0`
 - `--cooldown-journal-file data/paper_trade_journal.csv`
+- `--reselection-exit-mode replace_weak_hold_when_slot_needed`
+- `--replacement-score-mode entry_plus_overlay`
+- `--replacement-compare-mode candidate_vs_blend`
+- `--weak-max-positions 1`
+- `--neutral-max-positions 3`
+- `--strong-max-positions 3`
 - Discord 推送开启
+
+实盘/纸面观察仍然只做提示和纸面记录，不会自动向券商下单；替换策略会写入 signals 报告，并影响 portfolio guard 的槽位上限。
 
 查看全部快捷命令：
 
@@ -327,6 +335,18 @@ sh scripts/liubang_live.sh compare-scoring
 
 ```bash
 .venv/bin/python scripts/run_hourly_proxy_backtest.py
+```
+
+对比隔夜持仓继续持有 vs 第二天不再入选则开盘退出：
+
+```bash
+sh scripts/liubang_live.sh compare-reselection
+```
+
+优化弱持仓替换参数、候选评分口径和 regime 槽位组合：
+
+```bash
+sh scripts/liubang_live.sh optimize-replacement
 ```
 
 验证最新研究报告是否通过门槛：

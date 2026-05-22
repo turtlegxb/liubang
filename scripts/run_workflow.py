@@ -17,7 +17,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from liubang.cli_utils import load_env
-from liubang.backtest import SCORING_MODES
+from liubang.backtest import REPLACEMENT_COMPARE_MODES, REPLACEMENT_SCORE_MODES, RESELECTION_EXIT_MODES, SCORING_MODES
 
 
 EASTERN = ZoneInfo("America/New_York")
@@ -63,6 +63,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--scoring-mode", choices=SCORING_MODES, default=None)
     parser.add_argument("--symbol-cooldown-days", type=int, default=None)
     parser.add_argument("--cooldown-journal-file", default=None)
+    parser.add_argument("--reselection-exit-mode", choices=RESELECTION_EXIT_MODES, default=None)
+    parser.add_argument("--replacement-min-hold-score", type=float, default=None)
+    parser.add_argument("--replacement-min-candidate-score-margin", type=float, default=None)
+    parser.add_argument("--replacement-score-mode", choices=REPLACEMENT_SCORE_MODES, default=None)
+    parser.add_argument("--replacement-compare-mode", choices=REPLACEMENT_COMPARE_MODES, default=None)
+    parser.add_argument("--weak-max-positions", type=int, default=None)
+    parser.add_argument("--neutral-max-positions", type=int, default=None)
+    parser.add_argument("--strong-max-positions", type=int, default=None)
     parser.add_argument("--risk-per-trade-pct", type=float, default=None)
     parser.add_argument("--max-position-pct", type=float, default=None)
     parser.add_argument("--hard-stop-pct", type=float, default=None)
@@ -316,6 +324,14 @@ def append_signal_strategy_args(command: list[str], args: argparse.Namespace) ->
         "max_pullback_pct",
         "scoring_mode",
         "symbol_cooldown_days",
+        "reselection_exit_mode",
+        "replacement_min_hold_score",
+        "replacement_min_candidate_score_margin",
+        "replacement_score_mode",
+        "replacement_compare_mode",
+        "weak_max_positions",
+        "neutral_max_positions",
+        "strong_max_positions",
     ):
         value = getattr(args, key)
         if value is not None:

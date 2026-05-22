@@ -1289,3 +1289,174 @@ data/exports/latest_signal_selection.json
 ```bash
 .venv/bin/python scripts/generate_signals.py --skip-selection-export
 ```
+
+## 2026-05-22 隔夜滞留持仓是否应按每日重选退出
+
+问题：前一天未关闭的持仓，如果第二天不再进入 watchlist，是否应该退出？
+
+新增实验口径：
+
+```text
+reselection_exit_mode=next_open_not_reselected
+```
+
+规则：
+
+- 每个交易日用当前策略重新生成最终候选集
+- 已持有且不是当日新开的仓位，如果 symbol 不在当日候选集中，则按当日第一根 5 分钟 K 的开盘价退出
+- 该退出在当日新开仓前执行，因此会释放组合槽位
+
+对比命令：
+
+```bash
+sh scripts/liubang_live.sh compare-reselection
+```
+
+当前 `config/research_universe_dynamic.json` + live 口径结果：
+
+```text
+none:
+  trades=118 return=17.910% pf=1.6275 dd=6.473% avg_hold=2.29
+
+next_open_not_reselected:
+  trades=169 return=12.646% pf=1.3642 dd=6.445% avg_hold=1.74
+  reselection_exits=75 reselection_exit_pnl=23031.07
+
+next_open_not_reselected_when_slot_needed:
+  trades=163 return=15.898% pf=1.4492 dd=4.428% avg_hold=1.90
+  reselection_exits=50 reselection_exit_pnl=18403.99
+
+replace_weak_hold_when_slot_needed:
+  trades=120 return=20.355% pf=1.7889 dd=4.438% avg_hold=2.29
+  reselection_exits=8 reselection_exit_pnl=-1732.05 avg_exit_hold_score=5.844
+```
+
+退出原因结构：
+
+```text
+none:
+  stop=101 trades, time_exit=16 trades, earnings_exit=1 trade
+
+next_open_not_reselected:
+  reselection_exit=75 trades, stop=94 trades
+
+next_open_not_reselected_when_slot_needed:
+  reselection_exit=50 trades, stop=107 trades, time_exit=5 trades, earnings_exit=1 trade
+
+replace_weak_hold_when_slot_needed:
+  reselection_exit=8 trades, stop=95 trades, time_exit=16 trades, earnings_exit=1 trade
+```
+
+解读：
+
+- “次日不再入选就退出”确实缩短持仓时间，也释放更多槽位，因此交易数从 118 增加到 169。
+- “只有槽位不够时才替换旧仓”比无条件退出更合理，回撤也从 6.473% 降到 4.428%，但收益和 PF 仍低于默认继续持有。
+- 两种重选退出都降低总收益、PF、平均 R，说明它们虽然能锁住部分滞留仓利润，但过早切掉了原本靠 time exit 扩大利润的赢家。
+- 加入独立 `hold_score` 后，`replace_weak_hold_when_slot_needed` 触发 8 次，收益、PF、回撤都优于默认继续持有。
+- 小网格显示 `replacement_min_hold_score=7.0` 比 5.0/6.0 更好；`replacement_min_candidate_score_margin` 在 0/0.5/1.0 三档对当前样本没有影响，说明被替换旧仓和新候选分差已经足够大。
+- 这一步先没有切换实盘默认；后续 replace 参数优化完成后，已按用户确认把 live 观察默认切到更优组合，见下一节。
+
+完整报告：
+
+```text
+data/exports/reselection_exit_compare_20260522_031537_122994.json
+data/exports/reselection_exit_compare_20260522_031537_122994.csv
+```
+
+限制：历史回测没有真实复原 yfinance 每日 dynamic screener 成分变化；这里是在指定 universe 文件中每天重新评分和筛选，避免使用未来动态榜单造成未来函数。
+
+## 2026-05-22 replace 逻辑参数优化
+
+问题：在 `replace_weak_hold_when_slot_needed` 中，新候选是否应该直接使用 `hold_score`，以及替换阈值、比较方式、总槽位应该怎么取？
+
+结论：
+
+- 新候选不直接使用 `hold_score`。`hold_score` 是旧仓继续持有价值，包含浮盈 R、当前止损、是否打过 1R、持仓后的相对强弱等路径信息；新候选还没有这些状态。
+- 新候选使用独立 `replacement_candidate_score`，可选 `entry_score`、`entry_plus_rs`、`entry_plus_overlay`、`entry_plus_quality`。
+- 替换动作比较的是“新候选预期强度”与“旧仓继续持有价值/旧入场分/两者均值”，而不是把两类资产强行塞进同一个 hold 分数。
+
+运行命令：
+
+```bash
+sh scripts/liubang_live.sh optimize-replacement \
+  --hold-score-thresholds 6,7,8 \
+  --candidate-score-margins 0,0.5 \
+  --replacement-score-modes entry_score,entry_plus_rs,entry_plus_overlay,entry_plus_quality \
+  --replacement-compare-modes candidate_vs_hold,candidate_vs_entry,candidate_vs_blend \
+  --weak-slots 1 \
+  --neutral-slots 2,3 \
+  --strong-slots 3,4 \
+  --top 12
+```
+
+网格规模：
+
+```text
+replacement_configs=288
+baselines=4
+total_runs=292
+```
+
+各槽位 baseline：
+
+```text
+w1_n2_s3: return=17.910% pf=1.6275 dd=6.473% trades=118
+w1_n2_s4: return=10.739% pf=1.2893 dd=7.432% trades=146
+w1_n3_s3: return=15.460% pf=1.4935 dd=6.473% trades=127
+w1_n3_s4: return=9.434% pf=1.2395 dd=7.167% trades=155
+```
+
+各槽位最优：
+
+```text
+w1_n2_s3:
+  hold<=7 margin=0 entry_plus_overlay candidate_vs_entry
+  return=20.933% delta=+3.023% pf=1.8322 dd=4.353% trades=118 reselect=5
+
+w1_n2_s4:
+  hold<=7 margin=0 entry_plus_overlay candidate_vs_blend
+  return=18.859% delta=+8.120% pf=1.5683 dd=5.224% trades=151 reselect=13
+
+w1_n3_s3:
+  hold<=7 margin=0 entry_plus_overlay candidate_vs_blend
+  return=21.306% delta=+5.846% pf=1.7688 dd=4.438% trades=129 reselect=9
+
+w1_n3_s4:
+  hold<=7 margin=0 entry_plus_overlay candidate_vs_blend
+  return=19.981% delta=+10.547% pf=1.5756 dd=5.596% trades=158 reselect=13
+```
+
+当前最高收益组合：
+
+```text
+weak_max_positions=1
+neutral_max_positions=3
+strong_max_positions=3
+replacement_min_hold_score=7.0
+replacement_min_candidate_score_margin=0.5
+replacement_score_mode=entry_plus_overlay
+replacement_compare_mode=candidate_vs_blend
+
+return=21.306%
+delta_vs_same_slot_baseline=+5.846%
+profit_factor=1.7688
+max_drawdown=4.438%
+trades=129
+reselection_exits=9
+reselection_exit_pnl=-1830.57
+```
+
+解读：
+
+- `strong_max_positions=4` 在当前样本里明显变差，说明强市多加一个槽位会引入边际质量更低的交易。
+- `neutral_max_positions=3` 配合弱仓替换，收益最高；但如果不启用替换，`w1_n3_s3` baseline 低于当前默认 `w1_n2_s3`。
+- 候选评分的多种模式出现大量并列，说明触发替换的样本分差较大；真正决定结果的是旧仓是否足够弱、以及槽位是否被更高质量候选占用。
+- `candidate_vs_blend` 和 `candidate_vs_hold` 在最高收益组合中并列；文档推荐 `candidate_vs_blend`，因为它不会只因旧仓短期回撤而完全忽略旧仓原始入场质量。
+- 已按实盘观察默认切到该组合：`scripts/liubang_live.sh signals/workflow/day/loop` 会默认带入上述参数。注意这仍是观察和纸面记录默认，不会自动向券商下单；旧仓替换退出仍由人工确认。
+
+完整报告：
+
+```text
+data/exports/replacement_logic_optimization_20260522_033358_498141.json
+data/exports/replacement_logic_optimization_20260522_033358_498141.csv
+```
